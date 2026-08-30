@@ -43,7 +43,7 @@ export default function InvoicesPage() {
   const openNew = (partyId = "") => {
     setDraft({
       id: uid(),
-      invoiceNo: store.nextInvoiceNo(),
+      invoiceNo: partyId ? store.nextInvoiceNo(partyId, today()) : "",
       date: today(),
       partyId,
       fromDate: startOfMonth(),
@@ -266,6 +266,16 @@ function InvoiceBuilder({
 
   const set = <K extends keyof Invoice>(k: K, v: Invoice[K]) => setInv((p) => ({ ...p, [k]: v }));
 
+  // The number is built from the party's code and the invoice's financial year,
+  // so it has to be rebuilt when either changes — unless it's been hand-edited.
+  const [numberTouched, setNumberTouched] = useState(!isNew);
+  useEffect(() => {
+    if (numberTouched || !inv.partyId) return;
+    const next = store.nextInvoiceNo(inv.partyId, inv.date);
+    if (next !== inv.invoiceNo) setInv((p) => ({ ...p, invoiceNo: next }));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [inv.partyId, inv.date, numberTouched]);
+
   const candidates: Entry[] = useMemo(
     () => (inv.partyId ? entriesFor(inv.partyId, inv.fromDate, inv.toDate, isNew ? undefined : inv.id) : []),
     [inv.partyId, inv.fromDate, inv.toDate, inv.id, isNew, entriesFor]
@@ -324,8 +334,25 @@ function InvoiceBuilder({
     >
       <div className="grid gap-5">
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-          <Field label="Invoice no." required hint="Auto-numbered — edit freely">
-            <Input value={inv.invoiceNo} onChange={(e) => set("invoiceNo", e.target.value)} />
+          <Field
+            label="Invoice no."
+            required
+            hint={
+              numberTouched
+                ? "Edited by hand"
+                : inv.partyId
+                  ? "Built from the party code + year"
+                  : "Pick a party to number it"
+            }
+          >
+            <Input
+              value={inv.invoiceNo}
+              onChange={(e) => {
+                setNumberTouched(true);
+                set("invoiceNo", e.target.value);
+              }}
+              placeholder="CST/MTC/01/26-27"
+            />
           </Field>
           <Field label="Invoice date" required>
             <Input type="date" value={inv.date} onChange={(e) => set("date", e.target.value)} />

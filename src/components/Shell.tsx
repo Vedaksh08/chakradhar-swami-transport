@@ -16,6 +16,7 @@ import {
   Database,
   HardDrive,
   LogOut,
+  BarChart3,
 } from "lucide-react";
 import { useStore } from "@/lib/store";
 import { getSupabase } from "@/lib/supabase";
@@ -25,10 +26,15 @@ const NAV = [
   { href: "/", label: "Dashboard", icon: LayoutDashboard },
   { href: "/entries", label: "Entries", icon: ClipboardList },
   { href: "/invoices", label: "Invoices", icon: FileText },
+  { href: "/vehicles", label: "Vehicles", icon: Truck },
   { href: "/drivers", label: "Drivers", icon: Users },
   { href: "/parties", label: "Parties", icon: Building2 },
+  { href: "/reports", label: "Reports", icon: BarChart3 },
   { href: "/settings", label: "Settings", icon: Settings },
 ];
+
+/** The five that fit the phone tab bar. */
+const MOBILE_NAV = ["/", "/entries", "/invoices", "/vehicles", "/reports"];
 
 export function Shell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
@@ -187,7 +193,7 @@ export function Shell({ children }: { children: React.ReactNode }) {
       {/* Bottom tab bar — thumb-reachable on a phone */}
       <nav className="fixed inset-x-0 bottom-0 z-30 border-t border-navy-200 bg-white/95 backdrop-blur lg:hidden">
         <div className="flex">
-          {NAV.slice(0, 5).map(({ href, label, icon: Icon }) => (
+          {NAV.filter((n) => MOBILE_NAV.includes(n.href)).map(({ href, label, icon: Icon }) => (
             <Link
               key={href}
               href={href}

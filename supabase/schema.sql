@@ -7,6 +7,7 @@
 create table if not exists parties (
   id              text primary key,
   name            text not null,
+  code            text,
   address         text,
   gstin           text,
   pan             text,
@@ -16,6 +17,28 @@ create table if not exists parties (
   notes           text,
   "createdAt"     timestamptz not null default now()
 );
+
+-- Short code used to build invoice numbers: CST/MTC/01/26-27
+alter table parties add column if not exists code text;
+
+create table if not exists vehicles (
+  id                text primary key,
+  number            text not null,
+  make              text,
+  type              text,
+  "ownerName"       text,
+  "capacityMt"      numeric(10,3),
+  active            boolean not null default true,
+  notes             text,
+  "insuranceExpiry" date,
+  "fitnessExpiry"   date,
+  "permitExpiry"    date,
+  "pucExpiry"       date,
+  expenses          jsonb not null default '[]'::jsonb,
+  "createdAt"       timestamptz not null default now()
+);
+
+create unique index if not exists vehicles_number_idx on vehicles (upper(number));
 
 create table if not exists drivers (
   id                   text primary key,
@@ -70,12 +93,54 @@ create table if not exists entries (
   "detentionRemark"  text,
   "vehicleNo"        text not null default '',
   "driverId"         text references drivers (id) on delete set null,
-  expenses           jsonb not null default '[]'::jsonb,
-  "ackPhoto"         text,
+  "driverExpenses"   jsonb not null default '[]'::jsonb,
+  "vehicleExpenses"  jsonb not null default '[]'::jsonb,
+  photos             jsonb not null default '[]'::jsonb,
   remarks            text,
   "invoiceId"        text references invoices (id) on delete set null,
   "createdAt"        timestamptz not null default now()
 );
+
+-- ---------------------------------------------------------------------------
+-- Migration for databases created before expenses were split.
+--
+-- Old shape: one `expenses` list + a single `ackPhoto`.
+-- New shape: driverExpenses + vehicleExpenses, and a list of named photos.
+-- Existing costs move to vehicleExpenses (diesel and toll were the bulk of
+-- what was recorded), and any acknowledgment photo becomes the first photo.
+-- Safe to re-run; the old columns are left in place so nothing is lost.
+-- ---------------------------------------------------------------------------
+
+alter table entries add column if not exists "driverExpenses"  jsonb not null default '[]'::jsonb;
+alter table entries add column if not exists "vehicleExpenses" jsonb not null default '[]'::jsonb;
+alter table entries add column if not exists photos            jsonb not null default '[]'::jsonb;
+
+do $$
+begin
+  if exists (
+    select 1 from information_schema.columns
+    where table_name = 'entries' and column_name = 'expenses'
+  ) then
+    update entries
+       set "vehicleExpenses" = expenses
+     where "vehicleExpenses" = '[]'::jsonb
+       and expenses is not null
+       and expenses <> '[]'::jsonb;
+  end if;
+
+  if exists (
+    select 1 from information_schema.columns
+    where table_name = 'entries' and column_name = 'ackPhoto'
+  ) then
+    update entries
+       set photos = jsonb_build_array(
+             jsonb_build_object('id', id || '-ack', 'name', 'Acknowledgment', 'src', "ackPhoto")
+           )
+     where photos = '[]'::jsonb
+       and "ackPhoto" is not null
+       and "ackPhoto" <> '';
+  end if;
+end $$;
 
 -- Single-row table holding our own company details.
 create table if not exists company (
@@ -87,13 +152,17 @@ create table if not exists company (
   phone     text,
   pan       text,
   gstin     text,
+  "invoicePrefix" text,
   logo      text
 );
+
+alter table company add column if not exists "invoicePrefix" text;
 
 create index if not exists entries_date_idx      on entries (date);
 create index if not exists entries_party_idx     on entries ("partyId");
 create index if not exists entries_driver_idx    on entries ("driverId");
 create index if not exists entries_invoice_idx   on entries ("invoiceId");
+create index if not exists entries_vehicle_idx   on entries ("vehicleNo");
 create index if not exists invoices_party_idx    on invoices ("partyId");
 
 -- ---------------------------------------------------------------------------
@@ -108,6 +177,7 @@ create index if not exists invoices_party_idx    on invoices ("partyId");
 
 alter table parties  enable row level security;
 alter table drivers  enable row level security;
+alter table vehicles enable row level security;
 alter table entries  enable row level security;
 alter table invoices enable row level security;
 alter table company  enable row level security;
@@ -115,7 +185,7 @@ alter table company  enable row level security;
 do $$
 declare t text;
 begin
-  foreach t in array array['parties','drivers','entries','invoices','company'] loop
+  foreach t in array array['parties','drivers','vehicles','entries','invoices','company'] loop
     -- remove the earlier wide-open policy, if it is still there
     execute format('drop policy if exists %I on %I', t || '_anon_all', t);
     execute format('drop policy if exists %I on %I', t || '_auth_all', t);

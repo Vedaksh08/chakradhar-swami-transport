@@ -4,6 +4,7 @@ import { useRef, useState } from "react";
 import { Database, HardDrive, Download, Upload, AlertTriangle, Check } from "lucide-react";
 import type { CompanyProfile, DB } from "@/lib/types";
 import { useStore } from "@/lib/store";
+import { normaliseEntry } from "@/lib/repo";
 import { Card, Field, ImagePicker, Input, Modal, PageHeader, Textarea } from "@/components/ui";
 
 export default function SettingsPage() {
@@ -44,7 +45,8 @@ export default function SettingsPage() {
       await store.importDB({
         parties: parsed.parties ?? [],
         drivers: parsed.drivers ?? [],
-        entries: parsed.entries ?? [],
+        vehicles: parsed.vehicles ?? [],
+        entries: (parsed.entries ?? []).map(normaliseEntry),
         invoices: parsed.invoices ?? [],
         company: { ...store.company, ...(parsed.company ?? {}) },
       });
@@ -110,6 +112,18 @@ export default function SettingsPage() {
                   value={company.pan}
                   onChange={(e) => set("pan", e.target.value.toUpperCase())}
                   className="font-mono uppercase"
+                />
+              </Field>
+              <Field
+                label="Invoice prefix"
+                hint={`${company.invoicePrefix || "CST"}/MTC/01/26-27`}
+              >
+                <Input
+                  value={company.invoicePrefix ?? ""}
+                  onChange={(e) => set("invoicePrefix", e.target.value.toUpperCase())}
+                  placeholder="CST"
+                  className="font-mono uppercase"
+                  maxLength={10}
                 />
               </Field>
               <Field label="GSTIN" hint="Optional">

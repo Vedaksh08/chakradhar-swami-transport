@@ -14,8 +14,10 @@ import {
 } from "lucide-react";
 import { useStore } from "@/lib/store";
 import {
-  entryExpenses,
+  entryDriverExpenses,
+  entryNet,
   entryTotal,
+  entryVehicleExpenses,
   fmtDate,
   inr,
   startOfMonth,
@@ -29,6 +31,7 @@ type RangeKey = "today" | "week" | "month" | "all";
 export default function DashboardPage() {
   const { entries, invoices, parties, drivers, partyName, driverName } = useStore();
   const [range, setRange] = useState<RangeKey>("today");
+  const [partyFilter, setPartyFilter] = useState("");
 
   const todayISO = today();
 
@@ -44,8 +47,11 @@ export default function DashboardPage() {
   }, [range, todayISO]);
 
   const scoped = useMemo(
-    () => entries.filter((e) => e.date >= from && e.date <= to),
-    [entries, from, to]
+    () =>
+      entries
+        .filter((e) => e.date >= from && e.date <= to)
+        .filter((e) => !partyFilter || e.partyId === partyFilter),
+    [entries, from, to, partyFilter]
   );
 
   const totals = useMemo(
@@ -53,26 +59,28 @@ export default function DashboardPage() {
       scoped.reduce(
         (a, e) => {
           a.billable += entryTotal(e);
-          a.expenses += entryExpenses(e);
+          a.vehicleExp += entryVehicleExpenses(e);
+          a.driverExp += entryDriverExpenses(e);
+          a.net += entryNet(e);
           a.detention += e.detention ?? 0;
           if (e.direction === "outward") a.outward += 1;
           else a.inward += 1;
           return a;
         },
-        { billable: 0, expenses: 0, detention: 0, outward: 0, inward: 0 }
+        { billable: 0, vehicleExp: 0, driverExp: 0, net: 0, detention: 0, outward: 0, inward: 0 }
       ),
     [scoped]
   );
 
   /** Vehicles sent per party in the selected window — the headline question. */
   const byParty = useMemo(() => {
-    const m = new Map<string, { trips: number; qty: number; amount: number; expenses: number }>();
+    const m = new Map<string, { trips: number; qty: number; amount: number; net: number }>();
     for (const e of scoped) {
-      const s = m.get(e.partyId) ?? { trips: 0, qty: 0, amount: 0, expenses: 0 };
+      const s = m.get(e.partyId) ?? { trips: 0, qty: 0, amount: 0, net: 0 };
       s.trips += 1;
       s.qty += e.qty || 0;
       s.amount += entryTotal(e);
-      s.expenses += entryExpenses(e);
+      s.net += entryNet(e);
       m.set(e.partyId, s);
     }
     return [...m.entries()]
@@ -131,9 +139,23 @@ export default function DashboardPage() {
         actions={
           <>
             <Select
+              value={partyFilter}
+              onChange={(e) => setPartyFilter(e.target.value)}
+              className="w-auto"
+              aria-label="Filter by party"
+            >
+              <option value="">All parties</option>
+              {parties.map((p) => (
+                <option key={p.id} value={p.id}>
+                  {p.name}
+                </option>
+              ))}
+            </Select>
+            <Select
               value={range}
               onChange={(e) => setRange(e.target.value as RangeKey)}
               className="w-auto"
+              aria-label="Date range"
             >
               <option value="today">Today</option>
               <option value="week">Last 7 days</option>
@@ -147,7 +169,7 @@ export default function DashboardPage() {
         }
       />
 
-      <div className="stagger mb-5 grid grid-cols-2 gap-3 sm:gap-4 lg:grid-cols-4">
+      <div className="stagger mb-5 grid grid-cols-2 gap-3 sm:gap-4 lg:grid-cols-5">
         <Stat
           label="Vehicles sent"
           value={scoped.length}
@@ -162,15 +184,21 @@ export default function DashboardPage() {
           icon={<IndianRupee size={16} />}
         />
         <Stat
+          label="Vehicle expenses"
+          value={`₹${inr(totals.vehicleExp)}`}
+          tone="red"
+          icon={<Receipt size={16} />}
+        />
+        <Stat
           label="Driver expenses"
-          value={`₹${inr(totals.expenses)}`}
+          value={`₹${inr(totals.driverExp)}`}
           tone="red"
           icon={<Receipt size={16} />}
         />
         <Stat
           label="Net"
-          value={`₹${inr(totals.billable - totals.expenses)}`}
-          tone="green"
+          value={`₹${inr(totals.net)}`}
+          tone={totals.net >= 0 ? "green" : "red"}
           icon={<TrendingUp size={16} />}
         />
       </div>

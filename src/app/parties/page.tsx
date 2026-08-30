@@ -5,7 +5,7 @@ import Link from "next/link";
 import { Building2, Plus, Pencil, Trash2, Search, FileText } from "lucide-react";
 import type { Party } from "@/lib/types";
 import { useStore } from "@/lib/store";
-import { entryTotal, inr, uid } from "@/lib/calc";
+import { entryTotal, fyLabel, inr, today, uid } from "@/lib/calc";
 import {
   Card,
   EmptyState,
@@ -24,7 +24,7 @@ function blankParty(): Party {
 
 export default function PartiesPage() {
   const store = useStore();
-  const { parties, entries } = store;
+  const { parties, entries, company } = store;
 
   const [q, setQ] = useState("");
   const [draft, setDraft] = useState<Party | null>(null);
@@ -147,8 +147,20 @@ export default function PartiesPage() {
               const s = stats.get(p.id) ?? { trips: 0, total: 0, unbilled: 0 };
               return (
                 <tr key={p.id} className="group transition hover:bg-navy-50/60">
-                  <td className="td font-bold text-navy-900">{p.name}</td>
-                  <td className="td max-w-[260px] truncate text-navy-600">{p.address || "—"}</td>
+                  <td className="td">
+                    <Link
+                      href={`/parties/${p.id}`}
+                      className="font-bold text-navy-900 hover:underline"
+                    >
+                      {p.name}
+                    </Link>
+                    {p.code && (
+                      <span className="ml-2 rounded bg-navy-100 px-1.5 py-0.5 font-mono text-[10px] font-bold text-navy-600">
+                        {p.code}
+                      </span>
+                    )}
+                  </td>
+                  <td className="td max-w-[240px] truncate text-navy-600">{p.address || "—"}</td>
                   <td className="td font-mono text-xs">{p.gstin || "—"}</td>
                   <td className="td text-navy-600">
                     {p.contactPerson || p.phone ? (
@@ -224,13 +236,29 @@ export default function PartiesPage() {
       >
         {draft && (
           <div className="grid gap-4">
-            <Field label="Party / company name" required>
-              <Input
-                value={draft.name}
-                onChange={(e) => setDraft({ ...draft, name: e.target.value })}
-                placeholder="MTC BUSINESS PVT LTD"
-              />
-            </Field>
+            <div className="grid gap-4 sm:grid-cols-4">
+              <Field label="Party / company name" required className="sm:col-span-3">
+                <Input
+                  value={draft.name}
+                  onChange={(e) => setDraft({ ...draft, name: e.target.value })}
+                  placeholder="MTC BUSINESS PVT LTD"
+                />
+              </Field>
+              <Field
+                label="Code"
+                hint={`e.g. ${company.invoicePrefix ?? "CST"}/${
+                  draft.code?.trim().toUpperCase() || "MTC"
+                }/01/${fyLabel(today())}`}
+              >
+                <Input
+                  value={draft.code ?? ""}
+                  onChange={(e) => setDraft({ ...draft, code: e.target.value.toUpperCase() })}
+                  placeholder="MTC"
+                  className="uppercase"
+                  maxLength={12}
+                />
+              </Field>
+            </div>
             <Field label="Branch address">
               <Textarea
                 rows={3}

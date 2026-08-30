@@ -1,13 +1,25 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
-import { Plus, Trash2, Fuel } from "lucide-react";
-import type { Entry, ExpenseLine } from "@/lib/types";
-import { autoAmount, entryExpenses, entryTotal, inr, num, today, uid } from "@/lib/calc";
+import { useEffect, useState } from "react";
+import type { Entry } from "@/lib/types";
+import {
+  autoAmount,
+  entryDriverExpenses,
+  entryNet,
+  entryTotal,
+  entryVehicleExpenses,
+  inr,
+  num,
+  today,
+  uid,
+} from "@/lib/calc";
 import { useStore } from "@/lib/store";
-import { Field, ImagePicker, Input, Select, Textarea, cx } from "./ui";
+import { Field, Input, Select, Textarea, cx } from "./ui";
+import { ExpenseLines } from "./ExpenseLines";
+import { PhotoLines } from "./PhotoLines";
 
-const QUICK_EXPENSES = ["Diesel", "Toll", "Driver Exp", "Other"];
+const QUICK_VEHICLE = ["Diesel", "Toll", "Parking", "Repair"];
+const QUICK_DRIVER = ["Batta", "Food", "Advance", "Other"];
 
 export function blankEntry(invoiceNo: string): Entry {
   return {
@@ -22,7 +34,9 @@ export function blankEntry(invoiceNo: string): Entry {
     detention: undefined,
     vehicleNo: "",
     driverId: "",
-    expenses: [],
+    driverExpenses: [],
+    vehicleExpenses: [],
+    photos: [],
     createdAt: new Date().toISOString(),
   };
 }
@@ -52,24 +66,9 @@ export function EntryForm({
 
   const suggested = autoAmount(value.qty, value.rate);
   const total = entryTotal(value);
-  const expTotal = entryExpenses(value);
-
-  const addExpense = (label = "") =>
-    set("expenses", [...(value.expenses ?? []), { id: uid(), label, amount: 0 }]);
-
-  const patchExpense = (id: string, patch: Partial<ExpenseLine>) =>
-    set(
-      "expenses",
-      (value.expenses ?? []).map((x) => (x.id === id ? { ...x, ...patch } : x))
-    );
-
-  const removeExpense = (id: string) =>
-    set("expenses", (value.expenses ?? []).filter((x) => x.id !== id));
-
-  const usedLabels = useMemo(
-    () => new Set((value.expenses ?? []).map((x) => x.label.toLowerCase())),
-    [value.expenses]
-  );
+  const driverExp = entryDriverExpenses(value);
+  const vehicleExp = entryVehicleExpenses(value);
+  const net = entryNet(value);
 
   return (
     <div className="grid gap-5">
@@ -240,94 +239,69 @@ export function EntryForm({
           </Field>
         </div>
 
-        <div className="mt-4 flex items-center justify-between rounded-lg bg-navy-800 px-4 py-3">
-          <span className="text-[11px] font-bold uppercase tracking-wider text-navy-200">
-            Entry total {num(value.detention) ? "(incl. detention)" : ""}
-          </span>
-          <span className="tabular text-xl font-extrabold text-gold-400">₹{inr(total)}</span>
-        </div>
-      </div>
-
-      {/* Driver expenses */}
-      <div className="rounded-xl border border-navy-200 p-4">
-        <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
-          <div>
-            <h3 className="text-sm font-bold text-navy-900">Expenses by driver</h3>
-            <p className="text-xs text-navy-500">Tracked against the driver — never billed to the party.</p>
+        {/* Running result for this trip */}
+        <dl className="mt-4 overflow-hidden rounded-lg bg-navy-800 text-white">
+          <div className="flex items-center justify-between px-4 py-2.5">
+            <dt className="text-[11px] font-bold uppercase tracking-wider text-navy-200">
+              Billed {num(value.detention) ? "(incl. detention)" : ""}
+            </dt>
+            <dd className="tabular font-bold">₹{inr(total)}</dd>
           </div>
-          <button type="button" onClick={() => addExpense()} className="btn-ghost btn-sm">
-            <Plus size={14} /> Add
-          </button>
-        </div>
-
-        <div className="mb-3 flex flex-wrap gap-1.5">
-          {QUICK_EXPENSES.filter((q) => !usedLabels.has(q.toLowerCase())).map((q) => (
-            <button
-              key={q}
-              type="button"
-              onClick={() => addExpense(q)}
-              className="inline-flex items-center gap-1 rounded-full border border-navy-200 bg-white px-2.5 py-1 text-[11px] font-semibold text-navy-600 transition hover:border-navy-400 hover:bg-navy-50"
+          <div className="flex items-center justify-between border-t border-white/10 px-4 py-2">
+            <dt className="text-[11px] font-semibold uppercase tracking-wider text-navy-300">
+              − Vehicle expenses
+            </dt>
+            <dd className="tabular text-sm text-red-300">₹{inr(vehicleExp)}</dd>
+          </div>
+          <div className="flex items-center justify-between border-t border-white/10 px-4 py-2">
+            <dt className="text-[11px] font-semibold uppercase tracking-wider text-navy-300">
+              − Driver expenses
+            </dt>
+            <dd className="tabular text-sm text-red-300">₹{inr(driverExp)}</dd>
+          </div>
+          <div className="flex items-center justify-between border-t-2 border-gold-500 bg-navy-900 px-4 py-3">
+            <dt className="text-[11px] font-bold uppercase tracking-wider text-navy-200">
+              Net on this trip
+            </dt>
+            <dd
+              className={cx(
+                "tabular text-xl font-extrabold",
+                net >= 0 ? "text-gold-400" : "text-red-400"
+              )}
             >
-              {q === "Diesel" ? <Fuel size={12} /> : <Plus size={12} />} {q}
-            </button>
-          ))}
-        </div>
-
-        {(value.expenses ?? []).length === 0 ? (
-          <p className="rounded-lg border border-dashed border-navy-200 py-4 text-center text-xs text-navy-400">
-            No expenses recorded for this trip.
-          </p>
-        ) : (
-          <div className="grid gap-2">
-            {value.expenses.map((x) => (
-              <div key={x.id} className="flex items-center gap-2">
-                <Input
-                  value={x.label}
-                  onChange={(e) => patchExpense(x.id, { label: e.target.value })}
-                  placeholder="Expense name"
-                  className="flex-1"
-                />
-                <Input
-                  type="number"
-                  step="0.01"
-                  value={x.amount || ""}
-                  onChange={(e) => patchExpense(x.id, { amount: num(e.target.value) })}
-                  placeholder="0.00"
-                  className="w-32"
-                />
-                <button
-                  type="button"
-                  onClick={() => removeExpense(x.id)}
-                  className="rounded-lg p-2 text-navy-400 transition hover:bg-red-50 hover:text-red-600"
-                  aria-label="Remove expense"
-                >
-                  <Trash2 size={15} />
-                </button>
-              </div>
-            ))}
-            <div className="flex items-center justify-between border-t border-navy-100 pt-2 text-sm">
-              <span className="font-semibold text-navy-600">Total expenses</span>
-              <span className="tabular font-bold text-navy-900">₹{inr(expTotal)}</span>
-            </div>
+              ₹{inr(net)}
+            </dd>
           </div>
-        )}
+        </dl>
       </div>
 
-      <div className="grid gap-4 sm:grid-cols-2">
-        <ImagePicker
-          label="Acknowledgment photo"
-          value={value.ackPhoto}
-          onChange={(v) => set("ackPhoto", v)}
+      <ExpenseLines
+        title="Vehicle expenses"
+        hint="What the vehicle cost on this trip — diesel, toll, running repairs."
+        quick={QUICK_VEHICLE}
+        value={value.vehicleExpenses}
+        onChange={(lines) => set("vehicleExpenses", lines)}
+      />
+
+      <ExpenseLines
+        title="Driver expenses"
+        hint="What the driver spent — batta, food, road advance."
+        quick={QUICK_DRIVER}
+        value={value.driverExpenses}
+        onChange={(lines) => set("driverExpenses", lines)}
+        tone="gold"
+      />
+
+      <PhotoLines value={value.photos} onChange={(photos) => set("photos", photos)} />
+
+      <Field label="Remarks">
+        <Textarea
+          rows={3}
+          value={value.remarks ?? ""}
+          onChange={(e) => set("remarks", e.target.value)}
+          placeholder="Anything worth noting about this trip"
         />
-        <Field label="Remarks">
-          <Textarea
-            rows={5}
-            value={value.remarks ?? ""}
-            onChange={(e) => set("remarks", e.target.value)}
-            placeholder="Anything worth noting about this trip"
-          />
-        </Field>
-      </div>
+      </Field>
     </div>
   );
 }

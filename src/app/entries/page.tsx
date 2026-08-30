@@ -9,7 +9,7 @@ import {
   Trash2,
   ClipboardList,
   Download,
-  Image as ImageIcon,
+  Images,
   ArrowDownLeft,
   ArrowUpRight,
 } from "lucide-react";
@@ -18,8 +18,10 @@ import { useStore } from "@/lib/store";
 import {
   daysAgo,
   endOfMonth,
-  entryExpenses,
+  entryDriverExpenses,
+  entryNet,
   entryTotal,
+  entryVehicleExpenses,
   fmtDate,
   inr,
   startOfMonth,
@@ -39,6 +41,7 @@ import {
   cx,
 } from "@/components/ui";
 import { EntryForm, blankEntry } from "@/components/EntryForm";
+import { PhotoStrip } from "@/components/PhotoLines";
 import { downloadCsv } from "@/lib/csv";
 
 export default function EntriesPage() {
@@ -51,13 +54,14 @@ export default function EntriesPage() {
   const [to, setTo] = useState("");
   const [partyId, setPartyId] = useState("");
   const [driverId, setDriverId] = useState("");
+  const [vehicleNo, setVehicleNo] = useState("");
   const [direction, setDirection] = useState("");
   const [q, setQ] = useState("");
 
   const [draft, setDraft] = useState<Entry | null>(null);
   const [isNew, setIsNew] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState<Entry | null>(null);
-  const [photo, setPhoto] = useState<Entry | null>(null);
+  const [photos, setPhotos] = useState<Entry | null>(null);
 
   const filtered = useMemo(() => {
     const needle = q.trim().toLowerCase();
@@ -65,28 +69,38 @@ export default function EntriesPage() {
       .filter((e) => (!from || e.date >= from) && (!to || e.date <= to))
       .filter((e) => !partyId || e.partyId === partyId)
       .filter((e) => !driverId || e.driverId === driverId)
+      .filter((e) => !vehicleNo || e.vehicleNo === vehicleNo)
       .filter((e) => !direction || e.direction === direction)
       .filter((e) => {
         if (!needle) return true;
-        return [e.invoiceNo, e.vehicleNo, partyName(e.partyId), driverName(e.driverId), e.remarks]
+        return [
+          e.invoiceNo,
+          e.vehicleNo,
+          e.consignee,
+          partyName(e.partyId),
+          driverName(e.driverId),
+          e.remarks,
+        ]
           .join(" ")
           .toLowerCase()
           .includes(needle);
       })
       .sort((a, b) => b.date.localeCompare(a.date) || b.createdAt.localeCompare(a.createdAt));
-  }, [entries, from, to, partyId, driverId, direction, q, partyName, driverName]);
+  }, [entries, from, to, partyId, driverId, vehicleNo, direction, q, partyName, driverName]);
 
   const totals = useMemo(
     () =>
       filtered.reduce(
         (acc, e) => {
-          acc.amount += entryTotal(e);
-          acc.expenses += entryExpenses(e);
+          acc.billed += entryTotal(e);
+          acc.vehicleExp += entryVehicleExpenses(e);
+          acc.driverExp += entryDriverExpenses(e);
+          acc.net += entryNet(e);
           acc.qty += e.qty || 0;
-          if (e.invoiceId) acc.billed += 1;
+          if (e.invoiceId) acc.billedCount += 1;
           return acc;
         },
-        { amount: 0, expenses: 0, qty: 0, billed: 0 }
+        { billed: 0, vehicleExp: 0, driverExp: 0, net: 0, qty: 0, billedCount: 0 }
       ),
     [filtered]
   );
@@ -100,7 +114,12 @@ export default function EntriesPage() {
   }
 
   function openEdit(e: Entry) {
-    setDraft({ ...e, expenses: e.expenses ?? [] });
+    setDraft({
+      ...e,
+      driverExpenses: e.driverExpenses ?? [],
+      vehicleExpenses: e.vehicleExpenses ?? [],
+      photos: e.photos ?? [],
+    });
     setIsNew(false);
   }
 
@@ -120,21 +139,25 @@ export default function EntriesPage() {
           "Invoice No",
           "Direction",
           "Party",
+          "Delivered to",
           "Driver",
           "Vehicle",
           "Qty",
           "Rate",
           "Amount",
           "Detention",
-          "Total",
-          "Expenses",
           "Billed",
+          "Vehicle expenses",
+          "Driver expenses",
+          "Net",
+          "Invoiced",
         ],
         ...filtered.map((e) => [
           fmtDate(e.date),
           e.invoiceNo,
           e.direction,
           partyName(e.partyId),
+          e.consignee ?? "",
           driverName(e.driverId),
           e.vehicleNo,
           e.qty,
@@ -142,11 +165,13 @@ export default function EntriesPage() {
           e.amount,
           e.detention ?? 0,
           entryTotal(e),
-          entryExpenses(e),
+          entryVehicleExpenses(e),
+          entryDriverExpenses(e),
+          entryNet(e),
           e.invoiceId ? "Yes" : "No",
         ]),
       ],
-      `entries-${from}-to-${to}.csv`
+      `entries-${from || "all"}-to-${to || "all"}.csv`
     );
   }
 
@@ -176,14 +201,15 @@ export default function EntriesPage() {
         </div>
       )}
 
-      <div className="stagger mb-5 grid grid-cols-2 gap-3 sm:gap-4 lg:grid-cols-4">
-        <Stat label="Entries" value={filtered.length} sub={`${totals.billed} already billed`} />
-        <Stat label="Billable total" value={`₹${inr(totals.amount)}`} tone="gold" />
-        <Stat label="Driver expenses" value={`₹${inr(totals.expenses)}`} tone="red" />
+      <div className="stagger mb-5 grid grid-cols-2 gap-3 sm:gap-4 lg:grid-cols-5">
+        <Stat label="Entries" value={filtered.length} sub={`${totals.billedCount} invoiced`} />
+        <Stat label="Billed" value={`₹${inr(totals.billed)}`} tone="gold" />
+        <Stat label="Vehicle expenses" value={`₹${inr(totals.vehicleExp)}`} tone="red" />
+        <Stat label="Driver expenses" value={`₹${inr(totals.driverExp)}`} tone="red" />
         <Stat
           label="Net"
-          value={`₹${inr(totals.amount - totals.expenses)}`}
-          tone="green"
+          value={`₹${inr(totals.net)}`}
+          tone={totals.net >= 0 ? "green" : "red"}
           sub={`${totals.qty.toFixed(3)} total qty`}
         />
       </div>
@@ -224,7 +250,7 @@ export default function EntriesPage() {
           )}
         </div>
 
-        <div className="grid gap-3 border-b border-navy-100 p-4 sm:grid-cols-2 lg:grid-cols-6">
+        <div className="grid gap-3 border-b border-navy-100 p-4 sm:grid-cols-2 lg:grid-cols-7">
           <Field label="From" hint={from ? undefined : "any date"}>
             <Input type="date" value={from} onChange={(e) => setFrom(e.target.value)} />
           </Field>
@@ -237,6 +263,16 @@ export default function EntriesPage() {
               {parties.map((p) => (
                 <option key={p.id} value={p.id}>
                   {p.name}
+                </option>
+              ))}
+            </Select>
+          </Field>
+          <Field label="Vehicle">
+            <Select value={vehicleNo} onChange={(e) => setVehicleNo(e.target.value)}>
+              <option value="">All vehicles</option>
+              {store.vehicleNumbers.map((v) => (
+                <option key={v} value={v}>
+                  {v}
                 </option>
               ))}
             </Select>
@@ -274,7 +310,7 @@ export default function EntriesPage() {
         {filtered.length === 0 ? (
           <EmptyState
             icon={<ClipboardList size={32} />}
-            title="No entries in this range"
+            title="No entries match"
             message="Adjust the filters, or record the first trip for this period."
             action={
               parties.length ? (
@@ -294,85 +330,104 @@ export default function EntriesPage() {
                 <th className="th">Vehicle</th>
                 <th className="th">Driver</th>
                 <th className="th text-right">Qty</th>
-                <th className="th text-right">Rate</th>
-                <th className="th text-right">Amount</th>
-                <th className="th text-right">Detention</th>
-                <th className="th text-right">Total</th>
-                <th className="th text-right">Exp.</th>
+                <th className="th text-right">Billed</th>
+                <th className="th text-right">Veh. exp</th>
+                <th className="th text-right">Drv. exp</th>
+                <th className="th text-right">Net</th>
                 <th className="th">Status</th>
                 <th className="th"></th>
               </>
             }
           >
-            {filtered.map((e) => (
-              <tr key={e.id} className="group transition hover:bg-navy-50/60">
-                <td className="td">
-                  <div className="flex items-center gap-2">
-                    {e.direction === "outward" ? (
-                      <ArrowUpRight size={14} className="text-emerald-600" />
-                    ) : (
-                      <ArrowDownLeft size={14} className="text-navy-500" />
+            {filtered.map((e) => {
+              const net = entryNet(e);
+              const vExp = entryVehicleExpenses(e);
+              const dExp = entryDriverExpenses(e);
+              return (
+                <tr key={e.id} className="group transition hover:bg-navy-50/60">
+                  <td className="td">
+                    <div className="flex items-center gap-2">
+                      {e.direction === "outward" ? (
+                        <ArrowUpRight size={14} className="text-emerald-600" />
+                      ) : (
+                        <ArrowDownLeft size={14} className="text-navy-500" />
+                      )}
+                      {fmtDate(e.date)}
+                    </div>
+                  </td>
+                  <td className="td font-semibold">{e.invoiceNo}</td>
+                  <td className="td max-w-[180px] truncate">{partyName(e.partyId)}</td>
+                  <td className="td font-mono text-xs">{e.vehicleNo}</td>
+                  <td className="td">{driverName(e.driverId)}</td>
+                  <td className="td tabular text-right">{e.qty ? e.qty.toFixed(3) : "—"}</td>
+                  <td className="td tabular text-right font-semibold">
+                    {inr(entryTotal(e))}
+                    {e.detention ? (
+                      <span className="block text-[10px] font-semibold text-gold-700">
+                        incl. {inr(e.detention)} det.
+                      </span>
+                    ) : null}
+                  </td>
+                  <td className="td tabular text-right text-red-600">{vExp ? inr(vExp) : "—"}</td>
+                  <td className="td tabular text-right text-red-600">{dExp ? inr(dExp) : "—"}</td>
+                  <td
+                    className={cx(
+                      "td tabular text-right font-bold",
+                      net >= 0 ? "text-emerald-700" : "text-red-600"
                     )}
-                    {fmtDate(e.date)}
-                  </div>
-                </td>
-                <td className="td font-semibold">{e.invoiceNo}</td>
-                <td className="td max-w-[200px] truncate">{partyName(e.partyId)}</td>
-                <td className="td font-mono text-xs">{e.vehicleNo}</td>
-                <td className="td">{driverName(e.driverId)}</td>
-                <td className="td tabular text-right">{e.qty ? e.qty.toFixed(3) : "—"}</td>
-                <td className="td tabular text-right">{e.rate ? inr(e.rate) : "—"}</td>
-                <td className="td tabular text-right">{inr(e.amount)}</td>
-                <td className="td tabular text-right">
-                  {e.detention ? (
-                    <span className="font-semibold text-gold-700">{inr(e.detention)}</span>
-                  ) : (
-                    "—"
-                  )}
-                </td>
-                <td className="td tabular text-right font-bold">{inr(entryTotal(e))}</td>
-                <td className="td tabular text-right text-red-600">
-                  {entryExpenses(e) ? inr(entryExpenses(e)) : "—"}
-                </td>
-                <td className="td">
-                  {e.invoiceId ? <Chip tone="green">Billed</Chip> : <Chip tone="slate">Open</Chip>}
-                </td>
-                <td className="td">
-                  <div className="flex items-center justify-end gap-1 opacity-0 transition group-hover:opacity-100">
-                    {e.ackPhoto && (
+                  >
+                    {inr(net)}
+                  </td>
+                  <td className="td">
+                    {e.invoiceId ? <Chip tone="green">Billed</Chip> : <Chip tone="slate">Open</Chip>}
+                  </td>
+                  <td className="td">
+                    <div className="flex items-center justify-end gap-1 opacity-0 transition group-hover:opacity-100">
+                      {(e.photos ?? []).length > 0 && (
+                        <button
+                          onClick={() => setPhotos(e)}
+                          className="relative rounded-lg p-1.5 text-navy-500 hover:bg-navy-100"
+                          title={`${e.photos.length} photo(s)`}
+                        >
+                          <Images size={15} />
+                          <span className="absolute -right-0.5 -top-0.5 grid h-3.5 w-3.5 place-items-center rounded-full bg-navy-800 text-[9px] font-bold text-white">
+                            {e.photos.length}
+                          </span>
+                        </button>
+                      )}
                       <button
-                        onClick={() => setPhoto(e)}
+                        onClick={() => openEdit(e)}
                         className="rounded-lg p-1.5 text-navy-500 hover:bg-navy-100"
-                        title="Acknowledgment photo"
+                        title="Edit"
                       >
-                        <ImageIcon size={15} />
+                        <Pencil size={15} />
                       </button>
-                    )}
-                    <button
-                      onClick={() => openEdit(e)}
-                      className="rounded-lg p-1.5 text-navy-500 hover:bg-navy-100"
-                      title="Edit"
-                    >
-                      <Pencil size={15} />
-                    </button>
-                    <button
-                      onClick={() => setConfirmDelete(e)}
-                      className="rounded-lg p-1.5 text-navy-400 hover:bg-red-50 hover:text-red-600"
-                      title="Delete"
-                    >
-                      <Trash2 size={15} />
-                    </button>
-                  </div>
-                </td>
-              </tr>
-            ))}
+                      <button
+                        onClick={() => setConfirmDelete(e)}
+                        className="rounded-lg p-1.5 text-navy-400 hover:bg-red-50 hover:text-red-600"
+                        title="Delete"
+                      >
+                        <Trash2 size={15} />
+                      </button>
+                    </div>
+                  </td>
+                </tr>
+              );
+            })}
             <tr className="bg-navy-50 font-bold">
-              <td className="td" colSpan={9}>
+              <td className="td" colSpan={6}>
                 {filtered.length} entries
               </td>
-              <td className="td tabular text-right">{"₹"}{inr(totals.amount)}</td>
-              <td className="td tabular text-right text-red-600">
-                {"₹"}{inr(totals.expenses)}
+              <td className="td tabular text-right">₹{inr(totals.billed)}</td>
+              <td className="td tabular text-right text-red-600">₹{inr(totals.vehicleExp)}</td>
+              <td className="td tabular text-right text-red-600">₹{inr(totals.driverExp)}</td>
+              <td
+                className={cx(
+                  "td tabular text-right",
+                  totals.net >= 0 ? "text-emerald-700" : "text-red-600"
+                )}
+              >
+                ₹{inr(totals.net)}
               </td>
               <td className="td" colSpan={2}></td>
             </tr>
@@ -401,17 +456,15 @@ export default function EntriesPage() {
         {draft && <EntryForm value={draft} onChange={setDraft} />}
       </Modal>
 
-      {/* Photo */}
+      {/* Photos */}
       <Modal
-        open={!!photo}
-        onClose={() => setPhoto(null)}
-        title="Acknowledgment photo"
-        subtitle={photo ? `${photo.invoiceNo} - ${fmtDate(photo.date)}` : undefined}
+        open={!!photos}
+        onClose={() => setPhotos(null)}
+        title="Photos"
+        subtitle={photos ? `${photos.invoiceNo} · ${fmtDate(photos.date)}` : undefined}
+        wide
       >
-        {photo?.ackPhoto && (
-          // eslint-disable-next-line @next/next/no-img-element
-          <img src={photo.ackPhoto} alt="Acknowledgment" className="w-full rounded-lg" />
-        )}
+        {photos && <PhotoStrip photos={photos.photos ?? []} />}
       </Modal>
 
       {/* Delete */}
@@ -444,7 +497,7 @@ export default function EntriesPage() {
         </p>
         {confirmDelete?.invoiceId && (
           <p className="mt-3 rounded-lg bg-gold-50 px-3 py-2 text-sm text-gold-900">
-            This entry is already on an invoice. Deleting it will change that invoice&apos;s total.
+            This entry is on an invoice. That invoice will be re-totalled without it.
           </p>
         )}
       </Modal>

@@ -1,25 +1,20 @@
-// Domain model — exactly the fields Vedant specified, nothing more.
+// Domain model.
 
 export type Direction = "outward" | "inward";
 
-/** A free-form cost the driver incurred on a trip: diesel, toll, anything. */
+/** A free-form cost line: diesel, toll, tyre, anything. */
 export interface ExpenseLine {
   id: string;
   label: string;
   amount: number;
 }
 
-export interface Party {
+/** A named attachment on an entry — POD, weighment slip, damage photo, etc. */
+export interface PhotoLine {
   id: string;
   name: string;
-  address?: string;
-  gstin?: string;
-  pan?: string;
-  contactPerson?: string;
-  phone?: string;
-  email?: string;
-  notes?: string;
-  createdAt: string;
+  /** data URL */
+  src: string;
 }
 
 /** Money handed to a driver up front, to be settled against what he's owed. */
@@ -28,6 +23,21 @@ export interface AdvanceLine {
   date: string; // yyyy-mm-dd
   amount: number;
   note?: string;
+}
+
+export interface Party {
+  id: string;
+  name: string;
+  /** Short code used to build invoice numbers, e.g. "MTC" -> CST/MTC/01/26-27 */
+  code?: string;
+  address?: string;
+  gstin?: string;
+  pan?: string;
+  contactPerson?: string;
+  phone?: string;
+  email?: string;
+  notes?: string;
+  createdAt: string;
 }
 
 export interface Driver {
@@ -46,6 +56,7 @@ export interface Driver {
   monthlyPay?: number;
   /** Advances taken, dated so a month can be settled on its own. */
   advances?: AdvanceLine[];
+
   /** Scanned copies, stored as data URLs. All optional. */
   docs?: {
     photo?: string;
@@ -55,6 +66,42 @@ export interface Driver {
     police?: string;
   };
   createdAt: string;
+}
+
+/**
+ * A vehicle in the fleet.
+ *
+ * Vehicles are also referenced by registration number on entries, so one can
+ * appear in reports before anybody creates a record for it here.
+ */
+export interface Vehicle {
+  id: string;
+  number: string; // MH12NX9008 — stored uppercase, unique in practice
+  make?: string;
+  type?: string;
+  ownerName?: string;
+  capacityMt?: number;
+  active: boolean;
+  notes?: string;
+
+  // Renewal dates, so expiries can be surfaced
+  insuranceExpiry?: string;
+  fitnessExpiry?: string;
+  permitExpiry?: string;
+  pucExpiry?: string;
+
+  /** Costs not tied to any single trip: servicing, tyres, insurance premium. */
+  expenses?: VehicleExpense[];
+  createdAt: string;
+}
+
+/** A standalone vehicle cost, entered by hand on the vehicle page. */
+export interface VehicleExpense {
+  id: string;
+  date: string; // yyyy-mm-dd
+  category: string; // Maintenance / Tyre / Insurance / ...
+  amount: number;
+  note?: string;
 }
 
 /** One trip = one entry. */
@@ -83,10 +130,13 @@ export interface Entry {
   vehicleNo: string;
   driverId?: string;
 
-  /** Expenses borne by the driver on this trip. Never billed to the party. */
-  expenses: ExpenseLine[];
+  /** What the driver spent: batta, food, driver advance on the road. */
+  driverExpenses: ExpenseLine[];
+  /** What the vehicle cost on this trip: diesel, toll, parking, repairs. */
+  vehicleExpenses: ExpenseLine[];
 
-  ackPhoto?: string; // acknowledgment photo, data URL
+  /** Named attachments: POD, weighment slip, anything. */
+  photos: PhotoLine[];
   remarks?: string;
 
   /** Set once this entry has been pulled into a generated invoice. */
@@ -97,7 +147,7 @@ export interface Entry {
 
 export interface Invoice {
   id: string;
-  invoiceNo: string; // auto 1, 2, 3... always editable
+  invoiceNo: string; // CST/MTC/01/26-27 — auto-built, always editable
   date: string;
   partyId: string;
   fromDate: string;
@@ -122,12 +172,15 @@ export interface CompanyProfile {
   phone: string;
   pan: string;
   gstin?: string;
+  /** Leading segment of every invoice number, e.g. "CST". */
+  invoicePrefix?: string;
   logo?: string;
 }
 
 export interface DB {
   parties: Party[];
   drivers: Driver[];
+  vehicles: Vehicle[];
   entries: Entry[];
   invoices: Invoice[];
   company: CompanyProfile;

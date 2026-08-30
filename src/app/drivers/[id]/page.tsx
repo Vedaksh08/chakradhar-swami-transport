@@ -3,16 +3,19 @@
 import { useMemo, useState } from "react";
 import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
-import { ArrowLeft, Pencil, Trash2, Download, FileWarning } from "lucide-react";
+import { ArrowLeft, Pencil, Trash2, Download, FileWarning, Plus } from "lucide-react";
 import type { Driver } from "@/lib/types";
 import { useStore } from "@/lib/store";
 import {
   currentMonth,
-  entryExpenses,
+  entryDriverExpenses,
   fmtDate,
   inr,
   monthLabel,
+  num,
   settleMonth,
+  today,
+  uid,
 } from "@/lib/calc";
 import {
   Card,
@@ -48,6 +51,10 @@ export default function DriverDetailPage() {
   const [from, setFrom] = useState("");
   const [to, setTo] = useState("");
   const [month, setMonth] = useState(currentMonth());
+  const [addingAdvance, setAddingAdvance] = useState(false);
+  const [advanceDate, setAdvanceDate] = useState(today());
+  const [advanceAmount, setAdvanceAmount] = useState("");
+  const [advanceNote, setAdvanceNote] = useState("");
   const [draft, setDraft] = useState<Driver | null>(null);
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [preview, setPreview] = useState<{ src: string; label: string } | null>(null);
@@ -66,12 +73,12 @@ export default function DriverDetailPage() {
   );
 
   const totals = useMemo(
-    () => trips.reduce((a, e) => ({ exp: a.exp + entryExpenses(e) }), { exp: 0 }),
+    () => trips.reduce((a, e) => ({ exp: a.exp + entryDriverExpenses(e) }), { exp: 0 }),
     [trips]
   );
 
   const lifetimeExp = useMemo(
-    () => allTrips.reduce((s, e) => s + entryExpenses(e), 0),
+    () => allTrips.reduce((s, e) => s + entryDriverExpenses(e), 0),
     [allTrips]
   );
 
@@ -84,7 +91,7 @@ export default function DriverDetailPage() {
   const byCategory = useMemo(() => {
     const m = new Map<string, number>();
     for (const e of trips)
-      for (const x of e.expenses ?? []) {
+      for (const x of e.driverExpenses ?? []) {
         const key = (x.label || "Other").trim() || "Other";
         m.set(key, (m.get(key) ?? 0) + (x.amount || 0));
       }
@@ -150,7 +157,7 @@ export default function DriverDetailPage() {
       <Card
         className="mb-5"
         title="Settlement"
-        subtitle="Salary plus what he spent on trips, less what he's already taken."
+        subtitle="Salary for the month, less advances already taken."
         actions={
           <input
             type="month"
@@ -169,17 +176,18 @@ export default function DriverDetailPage() {
               hint={driver.monthlyPay ? undefined : "not set — add it in Edit"}
             />
             <SettleRow
-              label="Trip expenses to reimburse"
-              value={settlement.reimbursable}
-              hint={`${settlement.tripCount} ${settlement.tripCount === 1 ? "trip" : "trips"}`}
-            />
-            <SettleRow
               label="Advances taken"
               value={-settlement.advances}
               hint={`${settlement.advanceCount} ${
                 settlement.advanceCount === 1 ? "advance" : "advances"
               }`}
             />
+            <button
+              onClick={() => setAddingAdvance(true)}
+              className="btn-ghost btn-sm mt-1 justify-self-start"
+            >
+              <Plus size={14} /> Add advance
+            </button>
           </dl>
 
           <div
@@ -328,7 +336,7 @@ export default function DriverDetailPage() {
                       partyName(e.partyId),
                       e.vehicleNo,
                       e.qty,
-                      entryExpenses(e),
+                      entryDriverExpenses(e),
                     ]),
                   ],
                   `${driver.name.replace(/\s+/g, "-")}-trips.csv`
@@ -370,9 +378,9 @@ export default function DriverDetailPage() {
                   <td className="td max-w-[180px] truncate">{partyName(e.partyId)}</td>
                   <td className="td font-mono text-xs">{e.vehicleNo}</td>
                   <td className="td whitespace-normal">
-                    {(e.expenses ?? []).length ? (
+                    {(e.driverExpenses ?? []).length ? (
                       <div className="flex flex-wrap gap-1">
-                        {e.expenses.map((x) => (
+                        {e.driverExpenses.map((x) => (
                           <span
                             key={x.id}
                             className="rounded-full bg-navy-50 px-2 py-0.5 text-[11px] font-medium text-navy-600"
@@ -386,7 +394,7 @@ export default function DriverDetailPage() {
                     )}
                   </td>
                   <td className="td tabular text-right text-red-600">
-                    {entryExpenses(e) ? `₹${inr(entryExpenses(e))}` : "—"}
+                    {entryDriverExpenses(e) ? `₹${inr(entryDriverExpenses(e))}` : "—"}
                   </td>
                 </tr>
               ))}
@@ -400,6 +408,74 @@ export default function DriverDetailPage() {
           )}
         </Card>
       </div>
+
+      {/* Quick advance — no need to open the full edit form */}
+      <Modal
+        open={addingAdvance}
+        onClose={() => setAddingAdvance(false)}
+        title="Add advance"
+        subtitle={`Cash given to ${driver.name}`}
+        footer={
+          <>
+            <button className="btn-ghost" onClick={() => setAddingAdvance(false)}>
+              Cancel
+            </button>
+            <button
+              className="btn-primary"
+              disabled={!num(advanceAmount)}
+              onClick={async () => {
+                await store.saveDriver({
+                  ...driver,
+                  advances: [
+                    ...(driver.advances ?? []),
+                    {
+                      id: uid(),
+                      date: advanceDate,
+                      amount: num(advanceAmount),
+                      note: advanceNote.trim() || undefined,
+                    },
+                  ],
+                });
+                // Jump the settlement to the month the advance lands in.
+                setMonth(advanceDate.slice(0, 7));
+                setAdvanceAmount("");
+                setAdvanceNote("");
+                setAdvanceDate(today());
+                setAddingAdvance(false);
+              }}
+            >
+              Save advance
+            </button>
+          </>
+        }
+      >
+        <div className="grid gap-4 sm:grid-cols-2">
+          <Field label="Date" required>
+            <Input
+              type="date"
+              value={advanceDate}
+              onChange={(e) => setAdvanceDate(e.target.value)}
+            />
+          </Field>
+          <Field label="Amount" required>
+            <Input
+              type="number"
+              step="0.01"
+              value={advanceAmount}
+              onChange={(e) => setAdvanceAmount(e.target.value)}
+              placeholder="0.00"
+              autoFocus
+            />
+          </Field>
+          <Field label="Note" className="sm:col-span-2">
+            <Input
+              value={advanceNote}
+              onChange={(e) => setAdvanceNote(e.target.value)}
+              placeholder="What it was for (optional)"
+            />
+          </Field>
+        </div>
+      </Modal>
 
       <Modal
         open={!!draft}

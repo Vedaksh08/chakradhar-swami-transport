@@ -1,9 +1,9 @@
 "use client";
 
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useState } from "react";
-import type { CompanyProfile, DB, Driver, Entry, Invoice, Party } from "./types";
+import type { CompanyProfile, DB, Driver, Entry, Invoice, Party, Vehicle } from "./types";
 import { DEFAULT_COMPANY, repo, type TableName } from "./repo";
-import { entryTotal, inRange, num, round2, uid } from "./calc";
+import { buildInvoiceNo, entryTotal, inRange, num, round2, uid } from "./calc";
 
 interface StoreValue {
   ready: boolean;
@@ -13,12 +13,14 @@ interface StoreValue {
 
   parties: Party[];
   drivers: Driver[];
+  vehicles: Vehicle[];
   entries: Entry[];
   invoices: Invoice[];
   company: CompanyProfile;
 
   partyName: (id?: string) => string;
   driverName: (id?: string) => string;
+  /** Every registration seen — fleet records plus anything typed on an entry. */
   vehicleNumbers: string[];
   consignees: string[];
 
@@ -26,6 +28,8 @@ interface StoreValue {
   deleteParty: (id: string) => Promise<void>;
   saveDriver: (d: Driver) => Promise<void>;
   deleteDriver: (id: string) => Promise<void>;
+  saveVehicle: (v: Vehicle) => Promise<void>;
+  deleteVehicle: (id: string) => Promise<void>;
   saveEntry: (e: Entry) => Promise<void>;
   deleteEntry: (id: string) => Promise<void>;
   saveInvoice: (i: Invoice, linkedEntryIds: string[]) => Promise<void>;
@@ -34,7 +38,8 @@ interface StoreValue {
 
   /** Unbilled entries for a party inside a date range — what an invoice pulls in. */
   entriesFor: (partyId: string, from: string, to: string, includeInvoiceId?: string) => Entry[];
-  nextInvoiceNo: () => string;
+  /** Next invoice number in the CST/MTC/01/26-27 house format. */
+  nextInvoiceNo: (partyId: string, dateISO: string) => string;
   nextEntryInvoiceNo: () => string;
 
   importDB: (db: DB) => Promise<void>;
@@ -43,7 +48,14 @@ interface StoreValue {
 
 const Ctx = createContext<StoreValue | null>(null);
 
-const EMPTY: DB = { parties: [], drivers: [], entries: [], invoices: [], company: DEFAULT_COMPANY };
+const EMPTY: DB = {
+  parties: [],
+  drivers: [],
+  vehicles: [],
+  entries: [],
+  invoices: [],
+  company: DEFAULT_COMPANY,
+};
 
 export function StoreProvider({ children }: { children: React.ReactNode }) {
   const [db, setDb] = useState<DB>(EMPTY);
@@ -124,6 +136,26 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     async (id: string) => {
       await commit({ ...db, drivers: db.drivers.filter((d) => d.id !== id) }, () =>
         repo.remove("drivers", id)
+      );
+    },
+    [db, commit]
+  );
+
+  const saveVehicle = useCallback(
+    async (v: Vehicle) => {
+      const row = { ...v, number: v.number.trim().toUpperCase() };
+      const { nextList, exists } = upsert("vehicles", db.vehicles, row);
+      await commit({ ...db, vehicles: nextList }, () =>
+        exists ? repo.update("vehicles", row) : repo.insert("vehicles", row)
+      );
+    },
+    [db, commit, upsert]
+  );
+
+  const deleteVehicle = useCallback(
+    async (id: string) => {
+      await commit({ ...db, vehicles: db.vehicles.filter((v) => v.id !== id) }, () =>
+        repo.remove("vehicles", id)
       );
     },
     [db, commit]
@@ -261,9 +293,10 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
 
   const vehicleNumbers = useMemo(() => {
     const s = new Set<string>();
+    db.vehicles.forEach((v) => v.number && s.add(v.number.toUpperCase()));
     db.entries.forEach((e) => e.vehicleNo && s.add(e.vehicleNo.toUpperCase()));
     return [...s].sort();
-  }, [db.entries]);
+  }, [db.entries, db.vehicles]);
 
   /** Previously used delivery names, offered as suggestions on the entry form. */
   const consignees = useMemo(() => {
@@ -285,15 +318,18 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     [db.entries]
   );
 
-  /** Highest numeric invoice number seen, plus one. */
-  const nextInvoiceNo = useCallback(() => {
-    let max = 0;
-    for (const i of db.invoices) {
-      const m = String(i.invoiceNo).match(/(\d+)\s*$/);
-      if (m) max = Math.max(max, parseInt(m[1], 10));
-    }
-    return String(max + 1);
-  }, [db.invoices]);
+  /** Next number in the house format, e.g. CST/MTC/01/26-27. */
+  const nextInvoiceNo = useCallback(
+    (partyId: string, dateISO: string) =>
+      buildInvoiceNo(
+        db.company.invoicePrefix ?? "CST",
+        partyById.get(partyId)?.code,
+        dateISO,
+        db.invoices,
+        partyId
+      ),
+    [db.invoices, db.company.invoicePrefix, partyById]
+  );
 
   const nextEntryInvoiceNo = useCallback(() => {
     let max = 0;
@@ -311,6 +347,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     db,
     parties: db.parties,
     drivers: db.drivers,
+    vehicles: db.vehicles,
     entries: db.entries,
     invoices: db.invoices,
     company: db.company,
@@ -322,6 +359,8 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     deleteParty,
     saveDriver,
     deleteDriver,
+    saveVehicle,
+    deleteVehicle,
     saveEntry,
     deleteEntry,
     saveInvoice,

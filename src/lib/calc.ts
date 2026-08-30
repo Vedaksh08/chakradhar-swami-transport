@@ -19,12 +19,27 @@ export function entryTotal(e: Pick<Entry, "amount" | "detention">): number {
   return round2(num(e.amount) + num(e.detention));
 }
 
-/** Everything the driver spent on this trip. Never billed to the party. */
-export function entryExpenses(e: Pick<Entry, "expenses">): number {
-  return round2((e.expenses ?? []).reduce((s, x) => s + num(x.amount), 0));
+function sumLines(lines?: { amount: number }[]): number {
+  return round2((lines ?? []).reduce((s, x) => s + num(x.amount), 0));
 }
 
-export function entryProfit(e: Entry): number {
+/** What the driver spent on this trip. */
+export function entryDriverExpenses(e: Pick<Entry, "driverExpenses">): number {
+  return sumLines(e.driverExpenses);
+}
+
+/** What the vehicle cost on this trip: diesel, toll, running repairs. */
+export function entryVehicleExpenses(e: Pick<Entry, "vehicleExpenses">): number {
+  return sumLines(e.vehicleExpenses);
+}
+
+/** Driver + vehicle. Never billed to the party. */
+export function entryExpenses(e: Pick<Entry, "driverExpenses" | "vehicleExpenses">): number {
+  return round2(entryDriverExpenses(e) + entryVehicleExpenses(e));
+}
+
+/** What this single trip actually made: billed less everything it cost. */
+export function entryNet(e: Entry): number {
   return round2(entryTotal(e) - entryExpenses(e));
 }
 
@@ -33,13 +48,14 @@ export function entryProfit(e: Entry): number {
 export interface Settlement {
   /** Agreed salary for the month. */
   salary: number;
-  /** Trip costs the driver paid out of pocket — the company owes these back. */
-  reimbursable: number;
   /** Cash already handed over. */
   advances: number;
   /**
-   * salary + reimbursable - advances.
+   * salary - advances.
    * Positive: you owe the driver. Negative: the driver owes you.
+   *
+   * Trip costs are deliberately NOT part of this: the advance is what the
+   * driver runs the trip on, so reimbursing on top would pay him twice.
    */
   net: number;
   tripCount: number;
@@ -64,10 +80,8 @@ export function monthLabel(month: string): string {
 }
 
 /**
- * What is owed between the company and a driver for one month.
- *
- * The driver is paid his salary and reimbursed for what he spent running the
- * trips; anything already advanced to him is deducted.
+ * What is owed between the company and a driver for one month:
+ * salary earned, less whatever has already been advanced.
  */
 export function settleMonth(
   driver: { monthlyPay?: number; advances?: { date: string; amount: number }[] },
@@ -75,7 +89,6 @@ export function settleMonth(
   month: string
 ): Settlement {
   const trips = driverEntries.filter((e) => monthOf(e.date) === month);
-  const reimbursable = round2(trips.reduce((s, e) => s + entryExpenses(e), 0));
 
   const taken = (driver.advances ?? []).filter((a) => monthOf(a.date) === month);
   const advances = round2(taken.reduce((s, a) => s + num(a.amount), 0));
@@ -84,12 +97,61 @@ export function settleMonth(
 
   return {
     salary,
-    reimbursable,
     advances,
-    net: round2(salary + reimbursable - advances),
+    net: round2(salary - advances),
     tripCount: trips.length,
     advanceCount: taken.length,
   };
+}
+
+/* ------------------------------------------------------- invoice numbering */
+
+/**
+ * Build the next invoice number in the house format:
+ *
+ *   CST / MTC / 01 / 26-27
+ *   ^     ^     ^    ^
+ *   |     |     |    financial year of the invoice date
+ *   |     |     serial for that party within that year
+ *   |     party's short code
+ *   company prefix
+ *
+ * The serial restarts each financial year, per party, so numbering stays
+ * readable on a shelf of paper files.
+ */
+export function buildInvoiceNo(
+  prefix: string,
+  partyCode: string | undefined,
+  dateISO: string,
+  existing: { invoiceNo: string; partyId: string; date: string }[],
+  partyId: string
+): string {
+  const head = (prefix || "CST").trim().toUpperCase();
+  const code = (partyCode || "").trim().toUpperCase();
+  const fy = fyLabel(dateISO);
+
+  // Count this party's invoices already in the same financial year.
+  const used = existing.filter((i) => i.partyId === partyId && fyLabel(i.date) === fy);
+
+  // Prefer continuing from the highest serial actually seen, so gaps from
+  // deletions don't cause a collision.
+  let maxSerial = 0;
+  for (const i of used) {
+    const m = String(i.invoiceNo).match(/\/(\d+)\/[^/]*$/);
+    if (m) maxSerial = Math.max(maxSerial, parseInt(m[1], 10));
+  }
+  const serial = String(Math.max(maxSerial, used.length) + 1).padStart(2, "0");
+
+  return [head, code, serial, fy].filter(Boolean).join("/");
+}
+
+/** Indian financial year label for a date: 2026-08-30 -> "26-27" (Apr–Mar). */
+export function fyLabel(dateISO: string): string {
+  const d = new Date((dateISO || today()) + "T00:00:00");
+  if (Number.isNaN(d.getTime())) return "";
+  const y = d.getFullYear();
+  const start = d.getMonth() >= 3 ? y : y - 1; // April starts the FY
+  return `${String(start).slice(2)}-${String(start + 1).slice(2)}`;
 }
 
 /** Indian digit grouping: 2,40,834.00 */
