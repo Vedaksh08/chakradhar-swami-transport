@@ -22,6 +22,14 @@ export interface Party {
   createdAt: string;
 }
 
+/** Money handed to a driver up front, to be settled against what he's owed. */
+export interface AdvanceLine {
+  id: string;
+  date: string; // yyyy-mm-dd
+  amount: number;
+  note?: string;
+}
+
 export interface Driver {
   id: string;
   name: string;
@@ -33,6 +41,11 @@ export interface Driver {
   policeVerification?: string;
   active: boolean;
   notes?: string;
+
+  /** Agreed salary per month. Drives the monthly settlement. */
+  monthlyPay?: number;
+  /** Advances taken, dated so a month can be settled on its own. */
+  advances?: AdvanceLine[];
   /** Scanned copies, stored as data URLs. All optional. */
   docs?: {
     photo?: string;

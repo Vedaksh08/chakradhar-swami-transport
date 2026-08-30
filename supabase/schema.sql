@@ -28,9 +28,15 @@ create table if not exists drivers (
   "policeVerification" text,
   active               boolean not null default true,
   notes                text,
+  "monthlyPay"         numeric(14,2),
+  advances             jsonb not null default '[]'::jsonb,
   docs                 jsonb default '{}'::jsonb,
   "createdAt"          timestamptz not null default now()
 );
+
+-- Existing databases: add the pay/advance columns without touching data.
+alter table drivers add column if not exists "monthlyPay" numeric(14,2);
+alter table drivers add column if not exists advances jsonb not null default '[]'::jsonb;
 
 create table if not exists invoices (
   id               text primary key,

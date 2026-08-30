@@ -7,9 +7,12 @@ import { ArrowLeft, Pencil, Trash2, Download, FileWarning } from "lucide-react";
 import type { Driver } from "@/lib/types";
 import { useStore } from "@/lib/store";
 import {
+  currentMonth,
   entryExpenses,
   fmtDate,
   inr,
+  monthLabel,
+  settleMonth,
 } from "@/lib/calc";
 import {
   Card,
@@ -21,6 +24,7 @@ import {
   PageHeader,
   Stat,
   Table,
+  cx,
 } from "@/components/ui";
 import { DriverForm } from "@/components/DriverForm";
 import { downloadCsv } from "@/lib/csv";
@@ -43,6 +47,7 @@ export default function DriverDetailPage() {
   // Empty = unbounded, so every trip shows until a range is chosen.
   const [from, setFrom] = useState("");
   const [to, setTo] = useState("");
+  const [month, setMonth] = useState(currentMonth());
   const [draft, setDraft] = useState<Driver | null>(null);
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [preview, setPreview] = useState<{ src: string; label: string } | null>(null);
@@ -68,6 +73,11 @@ export default function DriverDetailPage() {
   const lifetimeExp = useMemo(
     () => allTrips.reduce((s, e) => s + entryExpenses(e), 0),
     [allTrips]
+  );
+
+  const settlement = useMemo(
+    () => settleMonth(driver ?? {}, allTrips, month),
+    [driver, allTrips, month]
   );
 
   /** Expense totals grouped by label across the selected range. */
@@ -135,6 +145,80 @@ export default function DriverDetailPage() {
         <Stat label="Spent in range" value={`₹${inr(totals.exp)}`} tone="red" />
         <Stat label="Spent lifetime" value={`₹${inr(lifetimeExp)}`} tone="gold" />
       </div>
+
+      {/* Monthly settlement — the bottom line for this driver */}
+      <Card
+        className="mb-5"
+        title="Settlement"
+        subtitle="Salary plus what he spent on trips, less what he's already taken."
+        actions={
+          <input
+            type="month"
+            value={month}
+            onChange={(e) => setMonth(e.target.value)}
+            className="field w-auto py-1.5 text-xs"
+            aria-label="Settlement month"
+          />
+        }
+      >
+        <div className="grid gap-5 lg:grid-cols-5">
+          <dl className="grid gap-2.5 text-sm lg:col-span-3">
+            <SettleRow
+              label="Monthly pay"
+              value={settlement.salary}
+              hint={driver.monthlyPay ? undefined : "not set — add it in Edit"}
+            />
+            <SettleRow
+              label="Trip expenses to reimburse"
+              value={settlement.reimbursable}
+              hint={`${settlement.tripCount} ${settlement.tripCount === 1 ? "trip" : "trips"}`}
+            />
+            <SettleRow
+              label="Advances taken"
+              value={-settlement.advances}
+              hint={`${settlement.advanceCount} ${
+                settlement.advanceCount === 1 ? "advance" : "advances"
+              }`}
+            />
+          </dl>
+
+          <div
+            className={cx(
+              "flex flex-col justify-center rounded-xl p-5 lg:col-span-2",
+              settlement.net >= 0 ? "bg-navy-800" : "bg-gold-500"
+            )}
+          >
+            <p
+              className={cx(
+                "text-[11px] font-bold uppercase tracking-wider",
+                settlement.net >= 0 ? "text-navy-200" : "text-navy-800"
+              )}
+            >
+              {monthLabel(month)}
+            </p>
+            <p
+              className={cx(
+                "tabular mt-1 text-2xl font-extrabold",
+                settlement.net >= 0 ? "text-gold-400" : "text-navy-950"
+              )}
+            >
+              ₹{inr(Math.abs(settlement.net))}
+            </p>
+            <p
+              className={cx(
+                "mt-1.5 text-sm font-semibold",
+                settlement.net >= 0 ? "text-white" : "text-navy-900"
+              )}
+            >
+              {settlement.net === 0
+                ? "Nothing outstanding either way."
+                : settlement.net > 0
+                  ? `You pay ${driver.name}`
+                  : `${driver.name} owes you`}
+            </p>
+          </div>
+        </div>
+      </Card>
 
       <div className="grid gap-5 lg:grid-cols-3">
         {/* Details */}
@@ -384,6 +468,30 @@ export default function DriverDetailPage() {
         </p>
       </Modal>
     </>
+  );
+}
+
+/** One line of the settlement, signed so the arithmetic is visible. */
+function SettleRow({
+  label,
+  value,
+  hint,
+}: {
+  label: string;
+  value: number;
+  hint?: string;
+}) {
+  const negative = value < 0;
+  return (
+    <div className="flex items-baseline justify-between gap-3 border-b border-navy-100 pb-2">
+      <dt className="text-navy-600">
+        {label}
+        {hint && <span className="ml-1.5 text-xs text-navy-400">{hint}</span>}
+      </dt>
+      <dd className={cx("tabular font-bold", negative ? "text-red-600" : "text-navy-900")}>
+        {negative ? "−" : "+"}₹{inr(Math.abs(value))}
+      </dd>
+    </div>
   );
 }
 

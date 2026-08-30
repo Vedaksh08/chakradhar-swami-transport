@@ -28,6 +28,70 @@ export function entryProfit(e: Entry): number {
   return round2(entryTotal(e) - entryExpenses(e));
 }
 
+/* ------------------------------------------------------- driver settlement */
+
+export interface Settlement {
+  /** Agreed salary for the month. */
+  salary: number;
+  /** Trip costs the driver paid out of pocket — the company owes these back. */
+  reimbursable: number;
+  /** Cash already handed over. */
+  advances: number;
+  /**
+   * salary + reimbursable - advances.
+   * Positive: you owe the driver. Negative: the driver owes you.
+   */
+  net: number;
+  tripCount: number;
+  advanceCount: number;
+}
+
+/** "2026-08" for a yyyy-mm-dd date. */
+export function monthOf(dateISO: string): string {
+  return (dateISO || "").slice(0, 7);
+}
+
+/** The current month as "2026-08". */
+export function currentMonth(): string {
+  return today().slice(0, 7);
+}
+
+/** Readable month label: "2026-08" -> "August 2026". */
+export function monthLabel(month: string): string {
+  const [y, m] = month.split("-").map(Number);
+  if (!y || !m) return month;
+  return new Date(y, m - 1, 1).toLocaleString("en-IN", { month: "long", year: "numeric" });
+}
+
+/**
+ * What is owed between the company and a driver for one month.
+ *
+ * The driver is paid his salary and reimbursed for what he spent running the
+ * trips; anything already advanced to him is deducted.
+ */
+export function settleMonth(
+  driver: { monthlyPay?: number; advances?: { date: string; amount: number }[] },
+  driverEntries: Entry[],
+  month: string
+): Settlement {
+  const trips = driverEntries.filter((e) => monthOf(e.date) === month);
+  const reimbursable = round2(trips.reduce((s, e) => s + entryExpenses(e), 0));
+
+  const taken = (driver.advances ?? []).filter((a) => monthOf(a.date) === month);
+  const advances = round2(taken.reduce((s, a) => s + num(a.amount), 0));
+
+  const salary = round2(driver.monthlyPay);
+
+  return {
+    salary,
+    reimbursable,
+    advances,
+    net: round2(salary + reimbursable - advances),
+    tripCount: trips.length,
+    advanceCount: taken.length,
+  };
+}
+
 /** Indian digit grouping: 2,40,834.00 */
 export function inr(n: unknown, withSymbol = false): string {
   const v = round2(n);
