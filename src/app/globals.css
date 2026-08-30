@@ -198,6 +198,7 @@ body {
     break-before: page;
     page-break-before: always;
   }
+
   /* Never carry screen animations into the printed sheet. */
   .animate-fade,
   .animate-rise,
@@ -207,8 +208,73 @@ body {
     opacity: 1 !important;
     transform: none !important;
   }
+
+  /* ---- Strip the app chrome so the page isn't shifted or overlaid ---- */
+  aside,
+  nav.fixed,
+  header.sticky {
+    display: none !important;
+  }
+
+  /* The content column is offset for the sidebar on screen; not on paper. */
+  main {
+    padding: 0 !important;
+    margin: 0 !important;
+    max-width: none !important;
+    width: 100% !important;
+  }
+  .lg\:pl-60 {
+    padding-left: 0 !important;
+  }
+
+  /*
+   * A horizontally scrolling container CLIPS in print — this is what cut the
+   * report tables off. Let them lay out at full width instead.
+   */
+  .overflow-x-auto,
+  .overflow-y-auto,
+  .overflow-hidden {
+    overflow: visible !important;
+    max-height: none !important;
+  }
+
+  table {
+    width: 100% !important;
+    font-size: 9px !important;
+  }
+  thead {
+    display: table-header-group; /* repeat the header on every page */
+  }
+  tr,
+  img {
+    break-inside: avoid;
+  }
+  .th,
+  .td {
+    padding: 3px 4px !important;
+    white-space: normal !important;
+  }
+
+  .card {
+    box-shadow: none !important;
+    break-inside: avoid;
+  }
+
   @page {
     size: A4 portrait;
     margin: 10mm;
   }
+
+  /*
+   * Wide tables (the reports) need the long edge of the paper. Named pages
+   * let one document use portrait and another landscape.
+   */
+  .print-landscape {
+    page: landscapePage;
+  }
+}
+
+@page landscapePage {
+  size: A4 landscape;
+  margin: 10mm;
 }

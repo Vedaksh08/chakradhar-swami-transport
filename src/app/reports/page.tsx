@@ -5,7 +5,6 @@ import Link from "next/link";
 import { BarChart3, Download, Printer } from "lucide-react";
 import { useStore } from "@/lib/store";
 import {
-  daysAgo,
   endOfMonth,
   entryDriverExpenses,
   entryNet,
@@ -17,26 +16,16 @@ import {
   today,
 } from "@/lib/calc";
 import { groupBy, inRangeLoose, standingExpenses, totalsFor, type GroupRow } from "@/lib/report";
-import {
-  Card,
-  EmptyState,
-  Field,
-  Input,
-  PageHeader,
-  Select,
-  Stat,
-  Table,
-  cx,
-} from "@/components/ui";
+import { Card, EmptyState, Field, Input, PageHeader, Select, Table, cx } from "@/components/ui";
 import { downloadCsv } from "@/lib/csv";
 
 type Kind = "party" | "vehicle" | "driver" | "detail";
 
-const KINDS: { key: Kind; label: string; blurb: string }[] = [
-  { key: "party", label: "By party", blurb: "What each company was billed, and what it earned." },
-  { key: "vehicle", label: "By vehicle", blurb: "What each vehicle ran, earned and cost." },
-  { key: "driver", label: "By driver", blurb: "Trips and spend per driver." },
-  { key: "detail", label: "Every trip", blurb: "The full line-by-line ledger." },
+const KINDS: { key: Kind; label: string }[] = [
+  { key: "party", label: "Party" },
+  { key: "vehicle", label: "Vehicle" },
+  { key: "driver", label: "Driver" },
+  { key: "detail", label: "Every trip" },
 ];
 
 export default function ReportsPage() {
@@ -62,9 +51,8 @@ export default function ReportsPage() {
   );
 
   /**
-   * Standing vehicle costs inside the window. Only counted when the report
-   * isn't narrowed to a party or driver, where attributing them would be
-   * arbitrary.
+   * Standing vehicle costs in the window. Only counted when the report isn't
+   * narrowed to a party or driver, where attributing them would be arbitrary.
    */
   const standing = useMemo(() => {
     if (partyId || driverId) return 0;
@@ -73,208 +61,163 @@ export default function ReportsPage() {
       .reduce((s, v) => s + standingExpenses(v, from, to), 0);
   }, [vehicles, vehicleNo, partyId, driverId, from, to]);
 
+  const tripTotals = useMemo(() => totalsFor(scoped), [scoped]);
   const totals = useMemo(() => totalsFor(scoped, standing), [scoped, standing]);
 
   const rows: GroupRow[] = useMemo(() => {
     if (kind === "party") return groupBy(scoped, (e) => e.partyId, (k) => partyName(k));
     if (kind === "vehicle") return groupBy(scoped, (e) => e.vehicleNo.toUpperCase(), (k) => k);
-    if (kind === "driver")
-      return groupBy(scoped, (e) => e.driverId ?? "", (k) => driverName(k));
+    if (kind === "driver") return groupBy(scoped, (e) => e.driverId ?? "", (k) => driverName(k));
     return [];
   }, [kind, scoped, partyName, driverName]);
 
-  const active = KINDS.find((k) => k.key === kind)!;
-
+  const kindLabel = KINDS.find((k) => k.key === kind)!.label;
   const rangeLabel = `${from ? fmtDate(from) : "start"} to ${to ? fmtDate(to) : "today"}`;
 
-  function exportCsv() {
-    if (kind === "detail") {
-      downloadCsv(
-        [
-          [
-            "Date",
-            "Inv No",
-            "Party",
-            "Delivered to",
-            "Vehicle",
-            "Driver",
-            "Qty",
-            "Billed",
-            "Vehicle exp",
-            "Driver exp",
-            "Net",
-          ],
-          ...scoped.map((e) => [
-            fmtDate(e.date),
-            e.invoiceNo,
-            partyName(e.partyId),
-            e.consignee ?? "",
-            e.vehicleNo,
-            driverName(e.driverId),
-            e.qty,
-            entryTotal(e),
-            entryVehicleExpenses(e),
-            entryDriverExpenses(e),
-            entryNet(e),
-          ]),
-        ],
-        `report-detail-${from || "all"}-${to || "all"}.csv`
-      );
-      return;
-    }
+  const filterLabel = [
+    partyId && partyName(partyId),
+    vehicleNo,
+    driverId && driverName(driverId),
+  ]
+    .filter(Boolean)
+    .join(" · ");
 
-    downloadCsv(
-      [
-        [active.label, "Trips", "Qty", "Billed", "Detention", "Vehicle exp", "Driver exp", "Net"],
-        ...rows.map((r) => [
-          r.label,
-          r.totals.trips,
-          r.totals.qty,
-          r.totals.billed,
-          r.totals.detention,
-          r.totals.vehicleExp,
-          r.totals.driverExp,
-          r.totals.net,
-        ]),
-      ],
-      `report-${kind}-${from || "all"}-${to || "all"}.csv`
-    );
+  function exportCsv() {
+    const rowsOut =
+      kind === "detail"
+        ? [
+            ["Date", "Inv No", "Party", "Delivered to", "Vehicle", "Driver", "Qty", "Billed", "Vehicle exp", "Driver exp", "Net"],
+            ...scoped.map((e) => [
+              fmtDate(e.date),
+              e.invoiceNo,
+              partyName(e.partyId),
+              e.consignee ?? "",
+              e.vehicleNo,
+              driverName(e.driverId),
+              e.qty,
+              entryTotal(e),
+              entryVehicleExpenses(e),
+              entryDriverExpenses(e),
+              entryNet(e),
+            ]),
+          ]
+        : [
+            [kindLabel, "Trips", "Qty", "Billed", "Detention", "Vehicle exp", "Driver exp", "Net"],
+            ...rows.map((r) => [
+              r.label,
+              r.totals.trips,
+              r.totals.qty,
+              r.totals.billed,
+              r.totals.detention,
+              r.totals.vehicleExp,
+              r.totals.driverExp,
+              r.totals.net,
+            ]),
+          ];
+    downloadCsv(rowsOut, `report-${kind}-${from || "all"}-${to || "all"}.csv`);
   }
 
   return (
-    <>
-      <PageHeader
-        title="Reports"
-        subtitle="Roll the ledger up by party, vehicle or driver — or read it line by line."
-        actions={
-          <>
-            <button onClick={exportCsv} className="btn-ghost" disabled={!scoped.length}>
-              <Download size={16} /> Export
-            </button>
-            <button onClick={() => window.print()} className="btn-primary" disabled={!scoped.length}>
-              <Printer size={16} /> Print
-            </button>
-          </>
-        }
-      />
-
-      {/* Report picker */}
-      <div className="no-print mb-5 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-        {KINDS.map((k) => (
-          <button
-            key={k.key}
-            onClick={() => setKind(k.key)}
-            className={cx(
-              "rounded-xl border p-4 text-left transition",
-              kind === k.key
-                ? "border-navy-800 bg-navy-800 text-white shadow-card"
-                : "border-navy-200 bg-white text-navy-800 hover:border-navy-400"
-            )}
-          >
-            <p className="text-sm font-bold">{k.label}</p>
-            <p
-              className={cx(
-                "mt-0.5 text-xs",
-                kind === k.key ? "text-navy-200" : "text-navy-500"
-              )}
-            >
-              {k.blurb}
-            </p>
-          </button>
-        ))}
-      </div>
-
-      <Card className="no-print mb-5" bodyClassName="p-4">
-        <div className="mb-3 flex flex-wrap gap-1.5">
-          {(
-            [
-              { label: "This month", from: startOfMonth(), to: endOfMonth() },
-              { label: "Last 30 days", from: daysAgo(30), to: today() },
-              { label: "This year", from: `${new Date().getFullYear()}-01-01`, to: today() },
-              { label: "All time", from: "", to: "" },
-            ] as const
-          ).map((r) => (
-            <button
-              key={r.label}
-              onClick={() => {
-                setFrom(r.from);
-                setTo(r.to);
-              }}
-              className={cx(
-                "rounded-full px-3 py-1 text-xs font-bold transition",
-                from === r.from && to === r.to
-                  ? "bg-navy-800 text-white"
-                  : "border border-navy-200 text-navy-600 hover:bg-navy-50"
-              )}
-            >
-              {r.label}
-            </button>
-          ))}
-        </div>
-
-        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
-          <Field label="From" hint={from ? undefined : "any date"}>
-            <Input type="date" value={from} onChange={(e) => setFrom(e.target.value)} />
-          </Field>
-          <Field label="To" hint={to ? undefined : "any date"}>
-            <Input type="date" value={to} onChange={(e) => setTo(e.target.value)} />
-          </Field>
-          <Field label="Party">
-            <Select value={partyId} onChange={(e) => setPartyId(e.target.value)}>
-              <option value="">All parties</option>
-              {parties.map((p) => (
-                <option key={p.id} value={p.id}>
-                  {p.name}
-                </option>
-              ))}
-            </Select>
-          </Field>
-          <Field label="Vehicle">
-            <Select value={vehicleNo} onChange={(e) => setVehicleNo(e.target.value)}>
-              <option value="">All vehicles</option>
-              {vehicleNumbers.map((v) => (
-                <option key={v} value={v}>
-                  {v}
-                </option>
-              ))}
-            </Select>
-          </Field>
-          <Field label="Driver">
-            <Select value={driverId} onChange={(e) => setDriverId(e.target.value)}>
-              <option value="">All drivers</option>
-              {drivers.map((d) => (
-                <option key={d.id} value={d.id}>
-                  {d.name}
-                </option>
-              ))}
-            </Select>
-          </Field>
-        </div>
-      </Card>
-
-      {/* Print header — only visible on paper */}
-      <div className="mb-4 hidden print:block">
-        <h1 className="text-lg font-extrabold">{company.name}</h1>
-        <p className="text-sm">
-          {active.label} · {rangeLabel}
-        </p>
-      </div>
-
-      <div className="stagger mb-5 grid grid-cols-2 gap-3 sm:gap-4 lg:grid-cols-5">
-        <Stat label="Trips" value={totals.trips} sub={`${totals.qty.toFixed(3)} qty`} />
-        <Stat label="Billed" value={`₹${inr(totals.billed)}`} tone="gold" />
-        <Stat label="Vehicle costs" value={`₹${inr(totals.vehicleExp + totals.standingExp)}`} tone="red" />
-        <Stat label="Driver costs" value={`₹${inr(totals.driverExp)}`} tone="red" />
-        <Stat
-          label="Net"
-          value={`₹${inr(totals.net)}`}
-          tone={totals.net >= 0 ? "green" : "red"}
+    <div className="print-landscape">
+      <div className="no-print">
+        <PageHeader
+          title="Reports"
+          subtitle="Roll the ledger up by party, vehicle or driver — or read it line by line."
+          actions={
+            <>
+              <button onClick={exportCsv} className="btn-ghost" disabled={!scoped.length}>
+                <Download size={16} /> Export
+              </button>
+              <button
+                onClick={() => window.print()}
+                className="btn-primary"
+                disabled={!scoped.length}
+              >
+                <Printer size={16} /> Print
+              </button>
+            </>
+          }
         />
+
+        {/* One compact control row: what to group by, then the filters. */}
+        <Card className="mb-5" bodyClassName="p-4">
+          <div className="mb-4 inline-flex rounded-lg bg-navy-100 p-1">
+            {KINDS.map((k) => (
+              <button
+                key={k.key}
+                onClick={() => setKind(k.key)}
+                aria-pressed={kind === k.key}
+                className={cx(
+                  "rounded-md px-3.5 py-1.5 text-xs font-bold transition",
+                  kind === k.key
+                    ? "bg-white text-navy-900 shadow-sm"
+                    : "text-navy-500 hover:text-navy-800"
+                )}
+              >
+                {k.label}
+              </button>
+            ))}
+          </div>
+
+          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
+            <Field label="From" hint={from ? undefined : "any date"}>
+              <Input type="date" value={from} onChange={(e) => setFrom(e.target.value)} />
+            </Field>
+            <Field label="To" hint={to ? undefined : "any date"}>
+              <Input type="date" value={to} onChange={(e) => setTo(e.target.value)} />
+            </Field>
+            <Field label="Party">
+              <Select value={partyId} onChange={(e) => setPartyId(e.target.value)}>
+                <option value="">All parties</option>
+                {parties.map((p) => (
+                  <option key={p.id} value={p.id}>
+                    {p.name}
+                  </option>
+                ))}
+              </Select>
+            </Field>
+            <Field label="Vehicle">
+              <Select value={vehicleNo} onChange={(e) => setVehicleNo(e.target.value)}>
+                <option value="">All vehicles</option>
+                {vehicleNumbers.map((v) => (
+                  <option key={v} value={v}>
+                    {v}
+                  </option>
+                ))}
+              </Select>
+            </Field>
+            <Field label="Driver">
+              <Select value={driverId} onChange={(e) => setDriverId(e.target.value)}>
+                <option value="">All drivers</option>
+                {drivers.map((d) => (
+                  <option key={d.id} value={d.id}>
+                    {d.name}
+                  </option>
+                ))}
+              </Select>
+            </Field>
+          </div>
+        </Card>
+      </div>
+
+      {/* Letterhead — paper only */}
+      <div className="mb-5 hidden print:block">
+        <div className="flex items-end justify-between border-b-2 border-navy-800 pb-2">
+          <div>
+            <h1 className="text-base font-extrabold uppercase tracking-wide">{company.name}</h1>
+            <p className="text-[11px]">{company.address}</p>
+          </div>
+          <div className="text-right text-[11px]">
+            <p className="font-bold uppercase tracking-wide">{kindLabel} report</p>
+            <p>{rangeLabel}</p>
+            {filterLabel && <p>{filterLabel}</p>}
+          </div>
+        </div>
       </div>
 
       <Card
-        title={active.label}
-        subtitle={`${rangeLabel}${standing ? ` · includes ₹${inr(standing)} of standing vehicle costs` : ""}`}
+        title={`${kindLabel} report`}
+        subtitle={`${rangeLabel}${filterLabel ? ` · ${filterLabel}` : ""}`}
         bodyClassName="p-0"
       >
         {scoped.length === 0 ? (
@@ -328,13 +271,22 @@ export default function ReportsPage() {
                 </tr>
               );
             })}
-            <TotalsRow labelSpan={5} totals={totals} />
+            <tr className="bg-navy-50 font-bold">
+              <td className="td" colSpan={5}>
+                {tripTotals.trips} trips
+              </td>
+              <td className="td tabular text-right">{tripTotals.qty.toFixed(3)}</td>
+              <td className="td tabular text-right">{inr(tripTotals.billed)}</td>
+              <td className="td tabular text-right text-red-600">{inr(tripTotals.vehicleExp)}</td>
+              <td className="td tabular text-right text-red-600">{inr(tripTotals.driverExp)}</td>
+              <td className="td tabular text-right">{inr(tripTotals.net)}</td>
+            </tr>
           </Table>
         ) : (
           <Table
             head={
               <>
-                <th className="th">{active.label.replace("By ", "")}</th>
+                <th className="th">{kindLabel}</th>
                 <th className="th text-right">Trips</th>
                 <th className="th text-right">Qty</th>
                 <th className="th text-right">Billed</th>
@@ -369,7 +321,7 @@ export default function ReportsPage() {
                 </td>
                 <td className="td tabular text-right">{r.totals.trips}</td>
                 <td className="td tabular text-right">{r.totals.qty.toFixed(3)}</td>
-                <td className="td tabular text-right font-semibold">₹{inr(r.totals.billed)}</td>
+                <td className="td tabular text-right font-semibold">{inr(r.totals.billed)}</td>
                 <td className="td tabular text-right text-gold-700">
                   {r.totals.detention ? inr(r.totals.detention) : "—"}
                 </td>
@@ -385,48 +337,58 @@ export default function ReportsPage() {
                     r.totals.net >= 0 ? "text-emerald-700" : "text-red-600"
                   )}
                 >
-                  ₹{inr(r.totals.net)}
+                  {inr(r.totals.net)}
                 </td>
               </tr>
             ))}
-            <TotalsRow labelSpan={3} totals={totals} showDetention />
+            <tr className="bg-navy-50 font-bold">
+              <td className="td">Total</td>
+              <td className="td tabular text-right">{tripTotals.trips}</td>
+              <td className="td tabular text-right">{tripTotals.qty.toFixed(3)}</td>
+              <td className="td tabular text-right">{inr(tripTotals.billed)}</td>
+              <td className="td tabular text-right text-gold-700">{inr(tripTotals.detention)}</td>
+              <td className="td tabular text-right text-red-600">{inr(tripTotals.vehicleExp)}</td>
+              <td className="td tabular text-right text-red-600">{inr(tripTotals.driverExp)}</td>
+              <td className="td tabular text-right">{inr(tripTotals.net)}</td>
+            </tr>
           </Table>
         )}
       </Card>
-    </>
-  );
-}
 
-function TotalsRow({
-  labelSpan,
-  totals,
-  showDetention,
-}: {
-  labelSpan: number;
-  totals: ReturnType<typeof totalsFor>;
-  showDetention?: boolean;
-}) {
-  return (
-    <tr className="bg-navy-50 font-bold">
-      <td className="td" colSpan={labelSpan}>
-        Total · {totals.trips} trips
-      </td>
-      {!showDetention && <td className="td tabular text-right">{totals.qty.toFixed(3)}</td>}
-      {showDetention && <td className="td tabular text-right">{totals.qty.toFixed(3)}</td>}
-      <td className="td tabular text-right">₹{inr(totals.billed)}</td>
-      {showDetention && (
-        <td className="td tabular text-right text-gold-700">₹{inr(totals.detention)}</td>
+      {/*
+        Standing vehicle costs can't be attributed to a party or driver, so they
+        sit below the table rather than making the total disagree with its rows.
+      */}
+      {scoped.length > 0 && (
+        <Card className="mt-5" bodyClassName="p-4">
+          <dl className="ml-auto grid max-w-sm gap-2 text-sm">
+            <div className="flex justify-between">
+              <dt className="text-navy-600">Net from trips</dt>
+              <dd className="tabular font-semibold">₹{inr(tripTotals.net)}</dd>
+            </div>
+            <div className="flex justify-between">
+              <dt className="text-navy-600">
+                Vehicle costs not tied to a trip
+                {(partyId || driverId) && (
+                  <span className="ml-1 text-xs text-navy-400">(excluded by filter)</span>
+                )}
+              </dt>
+              <dd className="tabular font-semibold text-red-600">− ₹{inr(standing)}</dd>
+            </div>
+            <div className="mt-1 flex justify-between border-t-2 border-navy-800 pt-2">
+              <dt className="font-bold text-navy-900">Overall net</dt>
+              <dd
+                className={cx(
+                  "tabular text-lg font-extrabold",
+                  totals.net >= 0 ? "text-emerald-700" : "text-red-600"
+                )}
+              >
+                ₹{inr(totals.net)}
+              </dd>
+            </div>
+          </dl>
+        </Card>
       )}
-      <td className="td tabular text-right text-red-600">₹{inr(totals.vehicleExp)}</td>
-      <td className="td tabular text-right text-red-600">₹{inr(totals.driverExp)}</td>
-      <td
-        className={cx(
-          "td tabular text-right",
-          totals.net >= 0 ? "text-emerald-700" : "text-red-600"
-        )}
-      >
-        ₹{inr(totals.net)}
-      </td>
-    </tr>
+    </div>
   );
 }

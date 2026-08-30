@@ -16,16 +16,12 @@ import {
 import type { Entry } from "@/lib/types";
 import { useStore } from "@/lib/store";
 import {
-  daysAgo,
-  endOfMonth,
   entryDriverExpenses,
   entryNet,
   entryTotal,
   entryVehicleExpenses,
   fmtDate,
   inr,
-  startOfMonth,
-  today,
 } from "@/lib/calc";
 import {
   Card,
@@ -107,6 +103,16 @@ export default function EntriesPage() {
 
   /** How many of the user's entries the current filters are hiding. */
   const hiddenCount = entries.length - filtered.length;
+
+  function clearFilters() {
+    setFrom("");
+    setTo("");
+    setPartyId("");
+    setDriverId("");
+    setVehicleNo("");
+    setDirection("");
+    setQ("");
+  }
 
   function openNew() {
     setDraft(blankEntry(store.nextEntryInvoiceNo()));
@@ -215,40 +221,18 @@ export default function EntriesPage() {
       </div>
 
       <Card bodyClassName="p-0">
-        {/* Quick ranges. "All time" is the default so nothing is ever hidden. */}
-        <div className="flex flex-wrap items-center gap-1.5 border-b border-navy-100 px-4 pt-4">
-          {(
-            [
-              { label: "All time", from: "", to: "" },
-              { label: "This month", from: startOfMonth(), to: endOfMonth() },
-              { label: "Last 30 days", from: daysAgo(30), to: today() },
-            ] as const
-          ).map((r) => {
-            const active = from === r.from && to === r.to;
-            return (
-              <button
-                key={r.label}
-                onClick={() => {
-                  setFrom(r.from);
-                  setTo(r.to);
-                }}
-                className={cx(
-                  "rounded-full px-3 py-1 text-xs font-bold transition",
-                  active
-                    ? "bg-navy-800 text-white"
-                    : "border border-navy-200 text-navy-600 hover:bg-navy-50"
-                )}
-              >
-                {r.label}
-              </button>
-            );
-          })}
-          {hiddenCount > 0 && (
-            <span className="ml-auto text-xs font-semibold text-gold-700">
-              {hiddenCount} {hiddenCount === 1 ? "entry" : "entries"} hidden by filters
+        {/* Only surfaced when filters are actually hiding something. */}
+        {hiddenCount > 0 && (
+          <div className="flex flex-wrap items-center justify-between gap-2 border-b border-navy-100 bg-gold-50 px-4 py-2">
+            <span className="text-xs font-semibold text-gold-900">
+              {hiddenCount} {hiddenCount === 1 ? "entry is" : "entries are"} hidden by the filters
+              below.
             </span>
-          )}
-        </div>
+            <button onClick={clearFilters} className="btn-ghost btn-sm">
+              Clear filters
+            </button>
+          </div>
+        )}
 
         <div className="grid gap-3 border-b border-navy-100 p-4 sm:grid-cols-2 lg:grid-cols-7">
           <Field label="From" hint={from ? undefined : "any date"}>
