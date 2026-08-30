@@ -5,7 +5,7 @@ import Link from "next/link";
 import { Building2, Plus, Pencil, Trash2, Search, FileText } from "lucide-react";
 import type { Party } from "@/lib/types";
 import { useStore } from "@/lib/store";
-import { entryTotal, inr, inrShort, uid } from "@/lib/calc";
+import { entryTotal, inr, uid } from "@/lib/calc";
 import {
   Card,
   EmptyState,
@@ -91,7 +91,7 @@ export default function PartiesPage() {
       <div className="stagger mb-5 grid grid-cols-2 gap-3 sm:grid-cols-3 sm:gap-4">
         <Stat label="Parties" value={parties.length} />
         <Stat label="Total trips" value={entries.length} />
-        <Stat label="Unbilled value" value={`₹${inrShort(totalUnbilled)}`} tone="gold" />
+        <Stat label="Unbilled value" value={`₹${inr(totalUnbilled)}`} tone="gold" />
       </div>
 
       <Card bodyClassName="p-0">

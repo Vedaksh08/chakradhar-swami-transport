@@ -5,7 +5,7 @@ import Link from "next/link";
 import { Users, Plus, Search, ChevronRight, IdCard } from "lucide-react";
 import type { Driver } from "@/lib/types";
 import { useStore } from "@/lib/store";
-import { entryExpenses, inr, inrShort, startOfMonth, today } from "@/lib/calc";
+import { entryExpenses, inr, startOfMonth, today } from "@/lib/calc";
 import { Card, Chip, EmptyState, Input, Modal, PageHeader, Stat, Table } from "@/components/ui";
 import { DriverForm, blankDriver } from "@/components/DriverForm";
 
@@ -68,7 +68,7 @@ export default function DriversPage() {
           sub={`${drivers.filter((d) => d.active).length} active`}
         />
         <Stat label="Trips recorded" value={entries.filter((e) => e.driverId).length} />
-        <Stat label="Expenses this month" value={`₹${inrShort(monthTotal)}`} tone="red" />
+        <Stat label="Expenses this month" value={`₹${inr(monthTotal)}`} tone="red" />
       </div>
 
       <Card bodyClassName="p-0">

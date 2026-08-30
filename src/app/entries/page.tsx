@@ -22,7 +22,6 @@ import {
   entryTotal,
   fmtDate,
   inr,
-  inrShort,
   startOfMonth,
   today,
 } from "@/lib/calc";
@@ -179,11 +178,11 @@ export default function EntriesPage() {
 
       <div className="stagger mb-5 grid grid-cols-2 gap-3 sm:gap-4 lg:grid-cols-4">
         <Stat label="Entries" value={filtered.length} sub={`${totals.billed} already billed`} />
-        <Stat label="Billable total" value={`₹${inrShort(totals.amount)}`} tone="gold" />
-        <Stat label="Driver expenses" value={`₹${inrShort(totals.expenses)}`} tone="red" />
+        <Stat label="Billable total" value={`₹${inr(totals.amount)}`} tone="gold" />
+        <Stat label="Driver expenses" value={`₹${inr(totals.expenses)}`} tone="red" />
         <Stat
           label="Net"
-          value={`₹${inrShort(totals.amount - totals.expenses)}`}
+          value={`₹${inr(totals.amount - totals.expenses)}`}
           tone="green"
           sub={`${totals.qty.toFixed(3)} total qty`}
         />

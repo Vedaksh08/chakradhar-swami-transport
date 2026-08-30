@@ -262,9 +262,11 @@ export function Stat({
         </p>
         {icon && <span className="hidden text-navy-300 sm:block">{icon}</span>}
       </div>
+      {/* Amounts are shown in full, so the type has to give way on narrow tiles
+          rather than overflow. */}
       <p
         className={cx(
-          "tabular mt-1.5 text-xl font-extrabold tracking-tight sm:mt-2 sm:text-2xl",
+          "tabular mt-1.5 break-all text-lg font-extrabold leading-tight tracking-tight sm:mt-2 sm:text-xl lg:text-2xl",
           accents[tone]
         )}
       >

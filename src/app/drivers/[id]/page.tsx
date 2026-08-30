@@ -10,7 +10,6 @@ import {
   entryExpenses,
   fmtDate,
   inr,
-  inrShort,
 } from "@/lib/calc";
 import {
   Card,
@@ -133,8 +132,8 @@ export default function DriverDetailPage() {
 
       <div className="stagger mb-5 grid grid-cols-2 gap-3 sm:grid-cols-3 sm:gap-4">
         <Stat label="Trips in range" value={trips.length} sub={`${allTrips.length} lifetime`} />
-        <Stat label="Spent in range" value={`₹${inrShort(totals.exp)}`} tone="red" />
-        <Stat label="Spent lifetime" value={`₹${inrShort(lifetimeExp)}`} tone="gold" />
+        <Stat label="Spent in range" value={`₹${inr(totals.exp)}`} tone="red" />
+        <Stat label="Spent lifetime" value={`₹${inr(lifetimeExp)}`} tone="gold" />
       </div>
 
       <div className="grid gap-5 lg:grid-cols-3">

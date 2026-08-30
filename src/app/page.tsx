@@ -18,7 +18,6 @@ import {
   entryTotal,
   fmtDate,
   inr,
-  inrShort,
   startOfMonth,
   today,
   toISODate,
@@ -157,20 +156,20 @@ export default function DashboardPage() {
         />
         <Stat
           label="Billable value"
-          value={`₹${inrShort(totals.billable)}`}
+          value={`₹${inr(totals.billable)}`}
           tone="gold"
-          sub={totals.detention ? `incl. ₹${inrShort(totals.detention)} detention` : undefined}
+          sub={totals.detention ? `incl. ₹${inr(totals.detention)} detention` : undefined}
           icon={<IndianRupee size={16} />}
         />
         <Stat
           label="Driver expenses"
-          value={`₹${inrShort(totals.expenses)}`}
+          value={`₹${inr(totals.expenses)}`}
           tone="red"
           icon={<Receipt size={16} />}
         />
         <Stat
           label="Net"
-          value={`₹${inrShort(totals.billable - totals.expenses)}`}
+          value={`₹${inr(totals.billable - totals.expenses)}`}
           tone="green"
           icon={<TrendingUp size={16} />}
         />
@@ -245,9 +244,9 @@ export default function DashboardPage() {
               <GlanceRow label="Invoices raised" value={invoices.length} href="/invoices" />
               <GlanceRow
                 label="Total billed"
-                value={`₹${inrShort(invoices.reduce((s, i) => s + i.total, 0))}`}
+                value={`₹${inr(invoices.reduce((s, i) => s + i.total, 0))}`}
               />
-              <GlanceRow label="Unbilled" value={`₹${inrShort(unbilledValue)}`} />
+              <GlanceRow label="Unbilled" value={`₹${inr(unbilledValue)}`} />
             </dl>
           </Card>
 

@@ -10,7 +10,6 @@ import {
   entryTotal,
   fmtDate,
   inr,
-  inrShort,
   num,
   round2,
   startOfMonth,
@@ -92,10 +91,10 @@ export default function InvoicesPage() {
 
       <div className="stagger mb-5 grid grid-cols-2 gap-3 sm:grid-cols-3 sm:gap-4">
         <Stat label="Invoices" value={invoices.length} />
-        <Stat label="Total billed" value={`₹${inrShort(totalBilled)}`} tone="green" />
+        <Stat label="Total billed" value={`₹${inr(totalBilled)}`} tone="green" />
         <Stat
           label="Unbilled entries"
-          value={`₹${inrShort(unbilledValue)}`}
+          value={`₹${inr(unbilledValue)}`}
           tone="gold"
           sub={`${entries.filter((e) => !e.invoiceId).length} entries waiting`}
         />
