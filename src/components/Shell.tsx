@@ -1,8 +1,8 @@
 "use client";
 
 import Link from "next/link";
-import { usePathname } from "next/navigation";
-import { useState } from "react";
+import { usePathname, useRouter } from "next/navigation";
+import { useEffect, useState } from "react";
 import {
   LayoutDashboard,
   ClipboardList,
@@ -15,8 +15,10 @@ import {
   Truck,
   Database,
   HardDrive,
+  LogOut,
 } from "lucide-react";
 import { useStore } from "@/lib/store";
+import { getSupabase } from "@/lib/supabase";
 import { cx } from "./ui";
 
 const NAV = [
@@ -30,11 +32,25 @@ const NAV = [
 
 export function Shell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
+  const router = useRouter();
   const [open, setOpen] = useState(false);
+  const [signedInAs, setSignedInAs] = useState<string | null>(null);
   const { company, backend, ready, error } = useStore();
 
-  // Print views render standalone, with no app chrome.
-  if (pathname?.includes("/print")) return <>{children}</>;
+  useEffect(() => {
+    const supabase = getSupabase();
+    if (!supabase) return;
+    supabase.auth.getUser().then(({ data }) => setSignedInAs(data.user?.email ?? null));
+  }, [pathname]);
+
+  async function signOut() {
+    await getSupabase()?.auth.signOut();
+    router.replace("/login");
+    router.refresh();
+  }
+
+  // Print views and the login screen render standalone, with no app chrome.
+  if (pathname?.includes("/print") || pathname === "/login") return <>{children}</>;
 
   const isActive = (href: string) =>
     href === "/" ? pathname === "/" : pathname?.startsWith(href);
@@ -77,7 +93,7 @@ export function Shell({ children }: { children: React.ReactNode }) {
   );
 
   const backendBadge = (
-    <div className="border-t border-white/10 p-3">
+    <div className="grid gap-2 border-t border-white/10 p-3">
       <div className="flex items-center gap-2 rounded-lg bg-white/5 px-3 py-2">
         {backend === "supabase" ? (
           <Database size={14} className="text-emerald-400" />
@@ -89,10 +105,19 @@ export function Shell({ children }: { children: React.ReactNode }) {
             {backend === "supabase" ? "Supabase" : "Local storage"}
           </p>
           <p className="truncate text-[10px] text-navy-300">
-            {backend === "supabase" ? "Cloud database" : "Saved in this browser"}
+            {signedInAs ?? (backend === "supabase" ? "Cloud database" : "Saved in this browser")}
           </p>
         </div>
       </div>
+
+      {signedInAs && (
+        <button
+          onClick={signOut}
+          className="flex items-center gap-2 rounded-lg px-3 py-2 text-[11px] font-bold text-navy-200 transition hover:bg-white/5 hover:text-white"
+        >
+          <LogOut size={14} /> Sign out
+        </button>
+      )}
     </div>
   );
 

@@ -91,11 +91,13 @@ create index if not exists entries_invoice_idx   on entries ("invoiceId");
 create index if not exists invoices_party_idx    on invoices ("partyId");
 
 -- ---------------------------------------------------------------------------
--- Row Level Security
+-- Row Level Security  — SIGNED-IN USERS ONLY
 --
--- Authentication is NOT wired up yet. These permissive policies let the anon
--- key read and write so the app works today. BEFORE going live with real data,
--- replace them with the authenticated block underneath.
+-- Every table is readable and writable only by a logged-in Supabase user.
+-- The anon key on its own can do nothing, so even though that key ships in the
+-- browser bundle, it is useless without a valid login.
+--
+-- Safe to re-run: it drops the old permissive policies first.
 -- ---------------------------------------------------------------------------
 
 alter table parties  enable row level security;
@@ -108,16 +110,25 @@ do $$
 declare t text;
 begin
   foreach t in array array['parties','drivers','entries','invoices','company'] loop
+    -- remove the earlier wide-open policy, if it is still there
     execute format('drop policy if exists %I on %I', t || '_anon_all', t);
+    execute format('drop policy if exists %I on %I', t || '_auth_all', t);
+
     execute format(
-      'create policy %I on %I for all to anon, authenticated using (true) with check (true)',
-      t || '_anon_all', t
+      'create policy %I on %I for all to authenticated using (true) with check (true)',
+      t || '_auth_all', t
     );
   end loop;
 end $$;
 
--- When you add auth, swap the above for:
+-- Users are created by hand in the Supabase dashboard:
+--   Authentication -> Users -> Add user -> Create new user
+--   (tick "Auto Confirm User" so no confirmation email is needed)
 --
---   drop policy parties_anon_all on parties;   -- (and the rest)
---   create policy parties_auth_all on parties
---     for all to authenticated using (true) with check (true);
+-- There is no public sign-up in the app, so the only accounts that exist are
+-- the ones you create there. To revoke someone, delete their user.
+--
+-- Verify the lockdown from a terminal — this must return an empty result or a
+-- permission error, never your data:
+--   curl "$SUPABASE_URL/rest/v1/entries?select=id" \
+--        -H "apikey: $ANON_KEY" -H "Authorization: Bearer $ANON_KEY"

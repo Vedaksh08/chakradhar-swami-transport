@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64">
+  <rect width="64" height="64" rx="14" fill="#17365d"/>
+  <!-- gold ring, echoing the invoice logo -->
+  <circle cx="32" cy="32" r="23" fill="none" stroke="#d59b2a" stroke-width="3"/>
+  <!-- truck: box body + cab + wheels, sized to stay legible at 16px -->
+  <g fill="#ffffff">
+    <rect x="14" y="24" width="20" height="14" rx="2"/>
+    <path d="M35 28h7.5a2 2 0 0 1 1.7.95l3.4 5.4a2 2 0 0 1 .4 1.2V38H35z"/>
+  </g>
+  <g fill="#17365d" stroke="#ffffff" stroke-width="2.5">
+    <circle cx="22" cy="42" r="3.5"/>
+    <circle cx="42" cy="42" r="3.5"/>
+  </g>
+</svg>
