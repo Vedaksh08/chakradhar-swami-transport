@@ -153,13 +153,24 @@ class SupabaseRepo implements Repo {
 
   async replaceAll(db: DB) {
     const sb = getSupabase()!;
+
+    // Children before parents, so foreign keys never block the wipe.
     for (const t of ["entries", "invoices", "parties", "drivers"] as TableName[]) {
-      await sb.from(t).delete().neq("id", "");
+      const { error } = await sb.from(t).delete().neq("id", "");
+      // Surface it — a silent failure here would look like a successful wipe.
+      if (error) throw new Error(`Could not clear ${t}: ${error.message}`);
     }
-    if (db.parties.length) await sb.from("parties").insert(db.parties);
-    if (db.drivers.length) await sb.from("drivers").insert(db.drivers);
-    if (db.entries.length) await sb.from("entries").insert(db.entries);
-    if (db.invoices.length) await sb.from("invoices").insert(db.invoices);
+
+    const seed = async (t: TableName, rows: unknown[]) => {
+      if (!rows.length) return;
+      const { error } = await sb.from(t).insert(rows);
+      if (error) throw new Error(`Could not restore ${t}: ${error.message}`);
+    };
+
+    await seed("parties", db.parties);
+    await seed("drivers", db.drivers);
+    await seed("invoices", db.invoices);
+    await seed("entries", db.entries);
     await this.saveCompany(db.company);
   }
 }

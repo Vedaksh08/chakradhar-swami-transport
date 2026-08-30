@@ -16,6 +16,8 @@ import {
 import type { Entry } from "@/lib/types";
 import { useStore } from "@/lib/store";
 import {
+  daysAgo,
+  endOfMonth,
   entryExpenses,
   entryTotal,
   fmtDate,
@@ -35,6 +37,7 @@ import {
   Select,
   Stat,
   Table,
+  cx,
 } from "@/components/ui";
 import { EntryForm, blankEntry } from "@/components/EntryForm";
 import { downloadCsv } from "@/lib/csv";
@@ -43,8 +46,10 @@ export default function EntriesPage() {
   const store = useStore();
   const { entries, parties, drivers, partyName, driverName } = store;
 
-  const [from, setFrom] = useState(startOfMonth());
-  const [to, setTo] = useState(today());
+  // Empty = unbounded. Default to showing everything, so no entry is ever
+  // hidden just because it falls outside a date window the user didn't set.
+  const [from, setFrom] = useState("");
+  const [to, setTo] = useState("");
   const [partyId, setPartyId] = useState("");
   const [driverId, setDriverId] = useState("");
   const [direction, setDirection] = useState("");
@@ -58,7 +63,7 @@ export default function EntriesPage() {
   const filtered = useMemo(() => {
     const needle = q.trim().toLowerCase();
     return entries
-      .filter((e) => e.date >= from && e.date <= to)
+      .filter((e) => (!from || e.date >= from) && (!to || e.date <= to))
       .filter((e) => !partyId || e.partyId === partyId)
       .filter((e) => !driverId || e.driverId === driverId)
       .filter((e) => !direction || e.direction === direction)
@@ -86,6 +91,9 @@ export default function EntriesPage() {
       ),
     [filtered]
   );
+
+  /** How many of the user's entries the current filters are hiding. */
+  const hiddenCount = entries.length - filtered.length;
 
   function openNew() {
     setDraft(blankEntry(store.nextEntryInvoiceNo()));
@@ -182,11 +190,46 @@ export default function EntriesPage() {
       </div>
 
       <Card bodyClassName="p-0">
+        {/* Quick ranges. "All time" is the default so nothing is ever hidden. */}
+        <div className="flex flex-wrap items-center gap-1.5 border-b border-navy-100 px-4 pt-4">
+          {(
+            [
+              { label: "All time", from: "", to: "" },
+              { label: "This month", from: startOfMonth(), to: endOfMonth() },
+              { label: "Last 30 days", from: daysAgo(30), to: today() },
+            ] as const
+          ).map((r) => {
+            const active = from === r.from && to === r.to;
+            return (
+              <button
+                key={r.label}
+                onClick={() => {
+                  setFrom(r.from);
+                  setTo(r.to);
+                }}
+                className={cx(
+                  "rounded-full px-3 py-1 text-xs font-bold transition",
+                  active
+                    ? "bg-navy-800 text-white"
+                    : "border border-navy-200 text-navy-600 hover:bg-navy-50"
+                )}
+              >
+                {r.label}
+              </button>
+            );
+          })}
+          {hiddenCount > 0 && (
+            <span className="ml-auto text-xs font-semibold text-gold-700">
+              {hiddenCount} {hiddenCount === 1 ? "entry" : "entries"} hidden by filters
+            </span>
+          )}
+        </div>
+
         <div className="grid gap-3 border-b border-navy-100 p-4 sm:grid-cols-2 lg:grid-cols-6">
-          <Field label="From">
+          <Field label="From" hint={from ? undefined : "any date"}>
             <Input type="date" value={from} onChange={(e) => setFrom(e.target.value)} />
           </Field>
-          <Field label="To">
+          <Field label="To" hint={to ? undefined : "any date"}>
             <Input type="date" value={to} onChange={(e) => setTo(e.target.value)} />
           </Field>
           <Field label="Party">

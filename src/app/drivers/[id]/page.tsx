@@ -11,8 +11,6 @@ import {
   fmtDate,
   inr,
   inrShort,
-  startOfMonth,
-  today,
 } from "@/lib/calc";
 import {
   Card,
@@ -43,8 +41,9 @@ export default function DriverDetailPage() {
 
   const driver = drivers.find((d) => d.id === id);
 
-  const [from, setFrom] = useState(startOfMonth());
-  const [to, setTo] = useState(today());
+  // Empty = unbounded, so every trip shows until a range is chosen.
+  const [from, setFrom] = useState("");
+  const [to, setTo] = useState("");
   const [draft, setDraft] = useState<Driver | null>(null);
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [preview, setPreview] = useState<{ src: string; label: string } | null>(null);
@@ -58,7 +57,7 @@ export default function DriverDetailPage() {
   );
 
   const trips = useMemo(
-    () => allTrips.filter((e) => e.date >= from && e.date <= to),
+    () => allTrips.filter((e) => (!from || e.date >= from) && (!to || e.date <= to)),
     [allTrips, from, to]
   );
 

@@ -3,7 +3,7 @@
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useState } from "react";
 import type { CompanyProfile, DB, Driver, Entry, Invoice, Party } from "./types";
 import { DEFAULT_COMPANY, repo, type TableName } from "./repo";
-import { entryTotal, inRange, uid } from "./calc";
+import { entryTotal, inRange, num, round2, uid } from "./calc";
 
 interface StoreValue {
   ready: boolean;
@@ -139,11 +139,48 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     [db, commit, upsert]
   );
 
+  /**
+   * Deleting an entry removes it everywhere it is referenced.
+   *
+   * Without this, an invoice would keep the dead id in `entryIds` and hold a
+   * total that no longer matches its own annexure — a wrong number on a
+   * financial document. Any invoice that included the entry is re-totalled
+   * from the entries that actually remain.
+   */
   const deleteEntry = useCallback(
     async (id: string) => {
-      await commit({ ...db, entries: db.entries.filter((e) => e.id !== id) }, () =>
-        repo.remove("entries", id)
-      );
+      const nextEntries = db.entries.filter((e) => e.id !== id);
+      const byId = new Map(nextEntries.map((e) => [e.id, e]));
+
+      const touched: Invoice[] = [];
+      const nextInvoices = db.invoices.map((inv) => {
+        if (!inv.entryIds.includes(id)) return inv;
+
+        const entryIds = inv.entryIds.filter((x) => x !== id);
+        const freightAmount = round2(
+          entryIds.reduce((sum, eid) => {
+            const e = byId.get(eid);
+            return sum + (e ? entryTotal(e) : 0);
+          }, 0)
+        );
+        const gst = inv.gstPaidByParty
+          ? 0
+          : round2((freightAmount * (num(inv.sgstPercent) + num(inv.cgstPercent))) / 100);
+
+        const updated: Invoice = {
+          ...inv,
+          entryIds,
+          freightAmount,
+          total: round2(freightAmount + gst),
+        };
+        touched.push(updated);
+        return updated;
+      });
+
+      await commit({ ...db, entries: nextEntries, invoices: nextInvoices }, async () => {
+        await repo.remove("entries", id);
+        for (const inv of touched) await repo.update("invoices", inv);
+      });
     },
     [db, commit]
   );
