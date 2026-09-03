@@ -108,6 +108,10 @@ create table if not exists invoices (
 alter table invoices add column if not exists "companyId" text references companies (id) on delete set null;
 create index if not exists invoices_company_idx on invoices ("companyId");
 
+-- 'trip' (the default) pulls in entries as usual; 'other' is a standalone,
+-- hand-entered charge with no entries attached.
+alter table invoices add column if not exists kind text not null default 'trip';
+
 create table if not exists entries (
   id                 text primary key,
   direction          text not null default 'outward'

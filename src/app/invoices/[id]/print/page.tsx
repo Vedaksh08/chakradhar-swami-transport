@@ -64,8 +64,11 @@ export default function InvoicePrintPage() {
     ? 0
     : (invoice.freightAmount * (num(invoice.sgstPercent) + num(invoice.cgstPercent))) / 100;
 
+  // An "other bill" has no trip entries, so there's nothing to annex.
+  const hasEntries = rows.length > 0;
+  const scopes = hasEntries ? SCOPES : SCOPES.filter((s) => s.key === "invoice");
   const showInvoice = scope !== "report";
-  const showReport = scope !== "invoice";
+  const showReport = scope !== "invoice" && hasEntries;
 
   return (
     <div className="min-h-screen bg-navy-100 pb-10">
@@ -86,7 +89,7 @@ export default function InvoicePrintPage() {
               role="group"
               aria-label="What to print"
             >
-              {SCOPES.map((s) => (
+              {scopes.map((s) => (
                 <button
                   key={s.key}
                   onClick={() => setScope(s.key)}
@@ -114,11 +117,13 @@ export default function InvoicePrintPage() {
         </div>
 
         <p className="mx-auto max-w-[900px] px-4 pb-2.5 text-[11px] text-navy-500">
-          {scope === "both"
-            ? "2 pages — invoice, then the entry report."
-            : scope === "invoice"
-              ? "1 page — the invoice only."
-              : "1 page — the entry report only."}
+          {!hasEntries
+            ? "1 page — no trip entries on this bill."
+            : scope === "both"
+              ? "2 pages — invoice, then the entry report."
+              : scope === "invoice"
+                ? "1 page — the invoice only."
+                : "1 page — the entry report only."}
         </p>
       </div>
 

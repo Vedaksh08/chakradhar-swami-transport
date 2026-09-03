@@ -128,13 +128,15 @@ export function InvoiceSheet({
             <td />
             <td colSpan={2}>
               <div className="transport-description">
-                TRANSPORTATION CHARGES AS PER
-                <br />
-                DETAIL ATTACHED
-                <small>
-                  {invoice.entryIds.length} trips · {fmtDate(invoice.fromDate)} to{" "}
-                  {fmtDate(invoice.toDate)}
-                </small>
+                {invoice.kind === "other" ? (
+                  "OTHER BILLING"
+                ) : (
+                  <>
+                    TRANSPORTATION CHARGES AS PER
+                    <br />
+                    DETAIL ATTACHED
+                  </>
+                )}
               </div>
             </td>
             <td className="summary-label">Freight Amt.</td>
@@ -286,7 +288,6 @@ const CSS = `
 .col-rate { width: 12%; } .col-trip { width: 9%; } .col-amount { width: 15%; }
 .transport-description-row td { height: 285px; vertical-align: top; padding-top: 15px; }
 .transport-description { color: var(--primary); font-size: 10px; font-weight: 800; line-height: 1.5; text-align: center; text-transform: uppercase; }
-.transport-description small { display: block; color: var(--muted); font-size: 8px; font-weight: 600; margin-top: 4px; text-transform: none; }
 .summary-label { color: var(--muted); font-size: 8.5px !important; font-weight: 800; text-align: right; text-transform: uppercase; }
 .summary-value { color: var(--primary); font-weight: 800; text-align: right; white-space: nowrap; font-variant-numeric: tabular-nums; }
 .gst-row td { background: #fbfcfe; }

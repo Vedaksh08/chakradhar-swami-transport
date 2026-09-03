@@ -187,6 +187,13 @@ export interface Invoice {
   companyId?: string;
   fromDate: string;
   toDate: string;
+  /**
+   * "trip" (default when absent) pulls entries into the bill as usual.
+   * "other" is a standalone bill for anything not tied to trip entries — a
+   * hand-entered amount under "OTHER BILLING", numbered in the same
+   * sequence as everything else billed to this party/company.
+   */
+  kind?: "trip" | "other";
   entryIds: string[];
   freightAmount: number;
   sgstPercent?: number;

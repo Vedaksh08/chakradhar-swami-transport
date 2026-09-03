@@ -171,6 +171,11 @@ export default function InvoicesPage() {
                       Company
                     </span>
                   )}
+                  {i.kind === "other" && (
+                    <span className="ml-1.5 rounded bg-gold-100 px-1.5 py-0.5 text-[10px] font-bold uppercase text-gold-700">
+                      Other bill
+                    </span>
+                  )}
                 </td>
                 <td className="td text-xs text-navy-500">
                   {fmtDate(i.fromDate)} → {fmtDate(i.toDate)}
@@ -264,6 +269,7 @@ export default function InvoicesPage() {
 /* ------------------------------------------------------------------ builder */
 
 type BillMode = "party" | "company";
+type BillKind = "trip" | "other";
 
 function InvoiceBuilder({
   draft: initial,
@@ -278,6 +284,7 @@ function InvoiceBuilder({
   const { parties, companies, entriesFor, entriesForCompany, partyName, companyName } = store;
   const [inv, setInv] = useState<Invoice>(initial);
   const [mode, setMode] = useState<BillMode>(initial.companyId ? "company" : "party");
+  const [billKind, setBillKind] = useState<BillKind>(initial.kind === "other" ? "other" : "trip");
   const [excluded, setExcluded] = useState<Set<string>>(() => new Set());
 
   const set = <K extends keyof Invoice>(k: K, v: Invoice[K]) => setInv((p) => ({ ...p, [k]: v }));
@@ -323,8 +330,11 @@ function InvoiceBuilder({
   );
 
   const freight = useMemo(
-    () => round2(selected.reduce((s, e) => s + entryTotal(e), 0)),
-    [selected]
+    () =>
+      billKind === "other"
+        ? round2(inv.freightAmount)
+        : round2(selected.reduce((s, e) => s + entryTotal(e), 0)),
+    [billKind, inv.freightAmount, selected]
   );
 
   const gst = inv.gstPaidByParty
@@ -339,21 +349,25 @@ function InvoiceBuilder({
     () => (billedCompany ? parties.filter((p) => p.companyId === billedCompany.id) : []),
     [billedCompany, parties]
   );
-  const valid = Boolean(billToId && inv.invoiceNo.trim() && selected.length);
+  const valid = Boolean(
+    billToId && inv.invoiceNo.trim() && (billKind === "other" ? freight > 0 : selected.length)
+  );
 
   async function save() {
     if (!valid) return;
+    const linkedIds = billKind === "other" ? [] : selected.map((e) => e.id);
     await store.saveInvoice(
       {
         ...inv,
         invoiceNo: inv.invoiceNo.trim(),
         partyId: mode === "party" ? inv.partyId : undefined,
         companyId: mode === "company" ? inv.companyId : undefined,
-        entryIds: selected.map((e) => e.id),
+        kind: billKind,
+        entryIds: linkedIds,
         freightAmount: freight,
         total,
       },
-      selected.map((e) => e.id)
+      linkedIds
     );
     onClose();
   }
@@ -363,7 +377,11 @@ function InvoiceBuilder({
       open
       onClose={onClose}
       title={isNew ? "Create invoice" : `Edit invoice ${initial.invoiceNo}`}
-      subtitle="Entries in the date range are pulled in automatically. Untick anything you want to leave out."
+      subtitle={
+        billKind === "other"
+          ? "A standalone charge — enter an amount, no trip entries needed."
+          : "Entries in the date range are pulled in automatically. Untick anything you want to leave out."
+      }
       wide
       footer={
         <>
@@ -486,98 +504,145 @@ function InvoiceBuilder({
           </div>
         )}
 
-        {/* Entries */}
-        <div className="rounded-xl border border-navy-200">
-          <header className="flex flex-wrap items-center justify-between gap-2 border-b border-navy-100 px-4 py-3">
-            <div>
-              <h3 className="text-sm font-bold text-navy-900">
-                Entries in range · {selected.length} of {candidates.length}
-              </h3>
-              <p className="text-xs text-navy-500">
-                Only unbilled entries appear here.
-              </p>
+        {/* Invoice type */}
+        <Field label="Invoice type">
+          <div className="inline-flex w-fit rounded-lg bg-navy-100 p-1">
+            <button
+              type="button"
+              onClick={() => setBillKind("trip")}
+              className={cx(
+                "rounded-md px-3.5 py-1.5 text-xs font-bold transition",
+                billKind === "trip" ? "bg-white text-navy-900 shadow-sm" : "text-navy-500"
+              )}
+            >
+              Trip invoice
+            </button>
+            <button
+              type="button"
+              onClick={() => setBillKind("other")}
+              className={cx(
+                "rounded-md px-3.5 py-1.5 text-xs font-bold transition",
+                billKind === "other" ? "bg-white text-navy-900 shadow-sm" : "text-navy-500"
+              )}
+            >
+              Other bill
+            </button>
+          </div>
+        </Field>
+
+        {billKind === "other" ? (
+          <div className="rounded-xl border border-navy-200 p-4">
+            <h3 className="text-sm font-bold text-navy-900">Other billing</h3>
+            <p className="mt-0.5 text-xs text-navy-500">
+              A standalone charge, not tied to any trip entries — prints as "OTHER BILLING" with
+              just the amount.
+            </p>
+            <div className="mt-3 max-w-[220px]">
+              <Field label="Amount" required>
+                <Input
+                  type="number"
+                  step="0.01"
+                  value={inv.freightAmount || ""}
+                  onChange={(e) => set("freightAmount", num(e.target.value))}
+                  placeholder="0.00"
+                  className="font-semibold"
+                />
+              </Field>
             </div>
-            {candidates.length > 0 && (
-              <div className="flex gap-2">
-                <button className="btn-ghost btn-sm" onClick={() => setExcluded(new Set())}>
-                  Select all
-                </button>
-                <button
-                  className="btn-ghost btn-sm"
-                  onClick={() => setExcluded(new Set(candidates.map((e) => e.id)))}
+          </div>
+        ) : (
+          <div className="rounded-xl border border-navy-200">
+            <header className="flex flex-wrap items-center justify-between gap-2 border-b border-navy-100 px-4 py-3">
+              <div>
+                <h3 className="text-sm font-bold text-navy-900">
+                  Entries in range · {selected.length} of {candidates.length}
+                </h3>
+                <p className="text-xs text-navy-500">
+                  Only unbilled entries appear here.
+                </p>
+              </div>
+              {candidates.length > 0 && (
+                <div className="flex gap-2">
+                  <button className="btn-ghost btn-sm" onClick={() => setExcluded(new Set())}>
+                    Select all
+                  </button>
+                  <button
+                    className="btn-ghost btn-sm"
+                    onClick={() => setExcluded(new Set(candidates.map((e) => e.id)))}
+                  >
+                    Clear
+                  </button>
+                </div>
+              )}
+            </header>
+
+            {!billToId ? (
+              <p className="px-4 py-8 text-center text-sm text-navy-400">
+                Choose a {mode} to see its entries.
+              </p>
+            ) : candidates.length === 0 ? (
+              <p className="px-4 py-8 text-center text-sm text-navy-400">
+                No unbilled entries for{" "}
+                {mode === "company" ? companyName(billToId) : partyName(billToId)} between{" "}
+                {fmtDate(inv.fromDate)} and {fmtDate(inv.toDate)}.
+              </p>
+            ) : (
+              <div className="max-h-72 overflow-y-auto">
+                <Table
+                  head={
+                    <>
+                      <th className="th w-10"></th>
+                      <th className="th">Date</th>
+                      {mode === "company" && <th className="th">Party</th>}
+                      <th className="th">Inv. No</th>
+                      <th className="th">Vehicle</th>
+                      <th className="th text-right">Qty</th>
+                      <th className="th text-right">Amount</th>
+                      <th className="th text-right">Detention</th>
+                      <th className="th text-right">Total</th>
+                    </>
+                  }
                 >
-                  Clear
-                </button>
+                  {candidates.map((e) => {
+                    const on = !excluded.has(e.id);
+                    return (
+                      <tr key={e.id} className={on ? "" : "opacity-45"}>
+                        <td className="td">
+                          <input
+                            type="checkbox"
+                            checked={on}
+                            onChange={() =>
+                              setExcluded((prev) => {
+                                const next = new Set(prev);
+                                on ? next.add(e.id) : next.delete(e.id);
+                                return next;
+                              })
+                            }
+                            className="h-4 w-4 rounded border-navy-300 text-navy-800 focus:ring-navy-500"
+                          />
+                        </td>
+                        <td className="td">{fmtDate(e.date)}</td>
+                        {mode === "company" && (
+                          <td className="td max-w-[160px] truncate text-xs text-navy-500">
+                            {partyName(e.partyId)}
+                          </td>
+                        )}
+                        <td className="td font-semibold">{e.invoiceNo}</td>
+                        <td className="td font-mono text-xs">{e.vehicleNo}</td>
+                        <td className="td tabular text-right">{e.qty ? e.qty.toFixed(3) : "—"}</td>
+                        <td className="td tabular text-right">{inr(e.amount)}</td>
+                        <td className="td tabular text-right text-gold-700">
+                          {e.detention ? inr(e.detention) : "—"}
+                        </td>
+                        <td className="td tabular text-right font-bold">{inr(entryTotal(e))}</td>
+                      </tr>
+                    );
+                  })}
+                </Table>
               </div>
             )}
-          </header>
-
-          {!billToId ? (
-            <p className="px-4 py-8 text-center text-sm text-navy-400">
-              Choose a {mode} to see its entries.
-            </p>
-          ) : candidates.length === 0 ? (
-            <p className="px-4 py-8 text-center text-sm text-navy-400">
-              No unbilled entries for{" "}
-              {mode === "company" ? companyName(billToId) : partyName(billToId)} between{" "}
-              {fmtDate(inv.fromDate)} and {fmtDate(inv.toDate)}.
-            </p>
-          ) : (
-            <div className="max-h-72 overflow-y-auto">
-              <Table
-                head={
-                  <>
-                    <th className="th w-10"></th>
-                    <th className="th">Date</th>
-                    {mode === "company" && <th className="th">Party</th>}
-                    <th className="th">Inv. No</th>
-                    <th className="th">Vehicle</th>
-                    <th className="th text-right">Qty</th>
-                    <th className="th text-right">Amount</th>
-                    <th className="th text-right">Detention</th>
-                    <th className="th text-right">Total</th>
-                  </>
-                }
-              >
-                {candidates.map((e) => {
-                  const on = !excluded.has(e.id);
-                  return (
-                    <tr key={e.id} className={on ? "" : "opacity-45"}>
-                      <td className="td">
-                        <input
-                          type="checkbox"
-                          checked={on}
-                          onChange={() =>
-                            setExcluded((prev) => {
-                              const next = new Set(prev);
-                              on ? next.add(e.id) : next.delete(e.id);
-                              return next;
-                            })
-                          }
-                          className="h-4 w-4 rounded border-navy-300 text-navy-800 focus:ring-navy-500"
-                        />
-                      </td>
-                      <td className="td">{fmtDate(e.date)}</td>
-                      {mode === "company" && (
-                        <td className="td max-w-[160px] truncate text-xs text-navy-500">
-                          {partyName(e.partyId)}
-                        </td>
-                      )}
-                      <td className="td font-semibold">{e.invoiceNo}</td>
-                      <td className="td font-mono text-xs">{e.vehicleNo}</td>
-                      <td className="td tabular text-right">{e.qty ? e.qty.toFixed(3) : "—"}</td>
-                      <td className="td tabular text-right">{inr(e.amount)}</td>
-                      <td className="td tabular text-right text-gold-700">
-                        {e.detention ? inr(e.detention) : "—"}
-                      </td>
-                      <td className="td tabular text-right font-bold">{inr(entryTotal(e))}</td>
-                    </tr>
-                  );
-                })}
-              </Table>
-            </div>
-          )}
-        </div>
+          </div>
+        )}
 
         {/* Totals */}
         <div className="grid gap-4 lg:grid-cols-2">
@@ -651,8 +716,9 @@ function InvoiceBuilder({
               </div>
             </dl>
             <p className="mt-3 text-xs text-navy-300">
-              {selected.length} {selected.length === 1 ? "entry" : "entries"} ·{" "}
-              {fmtDate(inv.fromDate)} to {fmtDate(inv.toDate)}
+              {billKind === "other"
+                ? `Other billing · ${fmtDate(inv.date)}`
+                : `${selected.length} ${selected.length === 1 ? "entry" : "entries"} · ${fmtDate(inv.fromDate)} to ${fmtDate(inv.toDate)}`}
             </p>
           </div>
         </div>
