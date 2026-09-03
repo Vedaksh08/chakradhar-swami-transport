@@ -299,7 +299,7 @@ export default function VehicleDetailPage() {
                   <td className="td text-right">
                     <button
                       onClick={() => setConfirmRemoveExp(x)}
-                      className="rounded-lg p-1.5 text-navy-400 opacity-0 transition hover:bg-red-50 hover:text-red-600 group-hover:opacity-100"
+                      className="rounded-lg p-1.5 text-navy-400 opacity-100 transition hover:bg-red-50 hover:text-red-600 lg:opacity-0 lg:group-hover:opacity-100"
                       aria-label="Remove expense"
                     >
                       <Trash2 size={15} />

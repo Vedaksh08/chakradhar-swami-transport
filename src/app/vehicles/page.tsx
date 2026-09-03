@@ -238,7 +238,7 @@ export default function VehiclesPage() {
                             setDraft(blankVehicle(r.number));
                             setIsNew(true);
                           }}
-                          className="rounded-lg p-1.5 text-navy-500 opacity-0 transition hover:bg-navy-100 group-hover:opacity-100"
+                          className="rounded-lg p-1.5 text-navy-500 opacity-100 transition hover:bg-navy-100 lg:opacity-0 lg:group-hover:opacity-100"
                           title="Add to fleet"
                         >
                           <Plus size={15} />
@@ -250,7 +250,7 @@ export default function VehiclesPage() {
                             setDraft(r.vehicle!);
                             setIsNew(false);
                           }}
-                          className="rounded-lg p-1.5 text-navy-500 opacity-0 transition hover:bg-navy-100 group-hover:opacity-100"
+                          className="rounded-lg p-1.5 text-navy-500 opacity-100 transition hover:bg-navy-100 lg:opacity-0 lg:group-hover:opacity-100"
                           title="Edit"
                         >
                           <Pencil size={15} />

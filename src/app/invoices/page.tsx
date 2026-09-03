@@ -171,7 +171,7 @@ export default function InvoicesPage() {
                   )}
                 </td>
                 <td className="td">
-                  <div className="flex items-center justify-end gap-1 opacity-0 transition group-hover:opacity-100">
+                  <div className="flex items-center justify-end gap-1 opacity-100 transition lg:opacity-0 lg:group-hover:opacity-100">
                     <Link
                       href={`/invoices/${i.id}/print`}
                       className="rounded-lg p-1.5 text-navy-500 hover:bg-navy-100"

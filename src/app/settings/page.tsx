@@ -1,11 +1,12 @@
 "use client";
 
 import { useRef, useState } from "react";
-import { Database, HardDrive, Download, Upload, AlertTriangle, Check } from "lucide-react";
+import { Database, HardDrive, Download, Upload, AlertTriangle, Check, Smartphone } from "lucide-react";
 import type { CompanyProfile, DB } from "@/lib/types";
 import { useStore } from "@/lib/store";
-import { normaliseEntry } from "@/lib/repo";
+import { DEFAULT_COMPANY, normaliseEntry } from "@/lib/repo";
 import { Card, Field, ImagePicker, Input, Modal, PageHeader, Textarea } from "@/components/ui";
+import { InstallAppButton } from "@/components/PWA";
 
 export default function SettingsPage() {
   const store = useStore();
@@ -13,6 +14,7 @@ export default function SettingsPage() {
   const [saved, setSaved] = useState(false);
   const [confirmReset, setConfirmReset] = useState(false);
   const [importError, setImportError] = useState<string | null>(null);
+  const [restored, setRestored] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
 
   const set = <K extends keyof CompanyProfile>(k: K, v: CompanyProfile[K]) =>
@@ -37,20 +39,26 @@ export default function SettingsPage() {
   async function restore(file?: File) {
     if (!file) return;
     setImportError(null);
+    setRestored(false);
     try {
       const parsed = JSON.parse(await file.text()) as Partial<DB>;
-      if (!Array.isArray(parsed.entries) || !Array.isArray(parsed.parties)) {
+      const required: (keyof DB)[] = ["parties", "drivers", "vehicles", "entries", "invoices"];
+      const missing = required.filter((k) => parsed[k] !== undefined && !Array.isArray(parsed[k]));
+      if (!Array.isArray(parsed.entries) || !Array.isArray(parsed.parties) || missing.length) {
         throw new Error("This file doesn't look like a backup.");
       }
+      const nextCompany = { ...store.company, ...(parsed.company ?? {}) };
       await store.importDB({
         parties: parsed.parties ?? [],
         drivers: parsed.drivers ?? [],
         vehicles: parsed.vehicles ?? [],
         entries: (parsed.entries ?? []).map(normaliseEntry),
         invoices: parsed.invoices ?? [],
-        company: { ...store.company, ...(parsed.company ?? {}) },
+        company: nextCompany,
       });
-      setCompany({ ...store.company, ...(parsed.company ?? {}) });
+      setCompany(nextCompany);
+      setRestored(true);
+      setTimeout(() => setRestored(false), 3000);
     } catch (e: any) {
       setImportError(e?.message ?? String(e));
     } finally {
@@ -183,7 +191,10 @@ NEXT_PUBLIC_SUPABASE_ANON_KEY=…`}
             )}
           </Card>
 
-          <Card title="Backup" subtitle="Keep a copy of everything.">
+          <Card
+            title="Backup"
+            subtitle="Everything — entries, invoices, vehicles, drivers and parties."
+          >
             <div className="grid gap-2">
               <button onClick={backup} className="btn-ghost w-full">
                 <Download size={16} /> Download backup
@@ -199,12 +210,30 @@ NEXT_PUBLIC_SUPABASE_ANON_KEY=…`}
                 onChange={(e) => restore(e.target.files?.[0])}
               />
               {importError && <p className="text-xs font-semibold text-red-600">{importError}</p>}
+              {restored && (
+                <p className="flex items-center gap-1.5 text-xs font-semibold text-emerald-600">
+                  <Check size={14} /> Restored — everything from the file is back.
+                </p>
+              )}
+            </div>
+          </Card>
+
+          <Card title="Install app" subtitle="Add a shortcut to your home screen.">
+            <div className="flex items-start gap-3 rounded-lg border border-navy-200 bg-navy-50/60 p-3">
+              <Smartphone size={18} className="mt-0.5 shrink-0 text-navy-600" />
+              <p className="text-xs text-navy-500">
+                Installs like a normal app — its own icon, no browser bar, works with a flaky
+                signal.
+              </p>
+            </div>
+            <div className="mt-3">
+              <InstallAppButton />
             </div>
           </Card>
 
           <Card title="Danger zone">
             <button onClick={() => setConfirmReset(true)} className="btn-danger w-full">
-              <AlertTriangle size={16} /> Clear all data
+              <AlertTriangle size={16} /> Reset data
             </button>
           </Card>
         </div>
@@ -213,7 +242,7 @@ NEXT_PUBLIC_SUPABASE_ANON_KEY=…`}
       <Modal
         open={confirmReset}
         onClose={() => setConfirmReset(false)}
-        title="Clear all data?"
+        title="Reset all data?"
         footer={
           <>
             <button className="btn-ghost" onClick={() => setConfirmReset(false)}>
@@ -223,18 +252,20 @@ NEXT_PUBLIC_SUPABASE_ANON_KEY=…`}
               className="btn-danger"
               onClick={async () => {
                 await store.resetAll();
+                setCompany(DEFAULT_COMPANY);
                 setConfirmReset(false);
               }}
             >
-              Yes, clear everything
+              Yes, reset everything
             </button>
           </>
         }
       >
         <p className="text-sm text-navy-600">
           All {store.entries.length} entries, {store.invoices.length} invoices,{" "}
-          {store.parties.length} parties and {store.drivers.length} drivers will be deleted. Your
-          company details are kept.
+          {store.parties.length} parties, {store.drivers.length} drivers and{" "}
+          {store.vehicles.length} vehicles will be deleted, and your company details reset to
+          blank. This is a full reset.
         </p>
         <p className="mt-3 rounded-lg bg-gold-50 px-3 py-2 text-sm text-gold-900">
           Download a backup first — this cannot be undone.

@@ -8,11 +8,15 @@ import { NextResponse, type NextRequest } from "next/server";
  * Supabase session never receives the application at all. It also refreshes
  * the session cookie on every request so logins don't expire mid-use.
  *
- * Excluded: the login page, Next's static assets and the icons (which the
- * browser requests before a session exists).
+ * Excluded: the login page, Next's static assets, the icons, and the PWA
+ * manifest + service worker — the OS/browser fetches those to decide
+ * installability and to register offline support before any session
+ * cookie exists, so gating them behind login breaks "Add to Home Screen".
  */
 export const config = {
-  matcher: ["/((?!_next/static|_next/image|icon|apple-icon|favicon).*)"],
+  matcher: [
+    "/((?!_next/static|_next/image|icons|icon|apple-icon|favicon|manifest|sw\\.js).*)",
+  ],
 };
 
 export async function middleware(req: NextRequest) {

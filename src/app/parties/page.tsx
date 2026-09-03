@@ -69,6 +69,9 @@ export default function PartiesPage() {
   const partyEntryCount = confirmDelete
     ? entries.filter((e) => e.partyId === confirmDelete.id).length
     : 0;
+  const partyInvoiceCount = confirmDelete
+    ? store.invoices.filter((i) => i.partyId === confirmDelete.id).length
+    : 0;
 
   return (
     <>
@@ -182,7 +185,7 @@ export default function PartiesPage() {
                     )}
                   </td>
                   <td className="td">
-                    <div className="flex items-center justify-end gap-1 opacity-0 transition group-hover:opacity-100">
+                    <div className="flex items-center justify-end gap-1 opacity-100 transition lg:opacity-0 lg:group-hover:opacity-100">
                       {s.unbilled > 0 && (
                         <Link
                           href={`/invoices?party=${p.id}`}
@@ -328,7 +331,6 @@ export default function PartiesPage() {
             </button>
             <button
               className="btn-danger"
-              disabled={partyEntryCount > 0}
               onClick={async () => {
                 if (confirmDelete) await store.deleteParty(confirmDelete.id);
                 setConfirmDelete(null);
@@ -339,11 +341,21 @@ export default function PartiesPage() {
           </>
         }
       >
-        {partyEntryCount > 0 ? (
+        {partyEntryCount > 0 || partyInvoiceCount > 0 ? (
           <p className="text-sm text-navy-600">
-            <strong>{confirmDelete?.name}</strong> has <strong>{partyEntryCount}</strong>{" "}
-            {partyEntryCount === 1 ? "entry" : "entries"} recorded against it. Delete or reassign
-            those entries first.
+            <strong>{confirmDelete?.name}</strong> will be removed permanently, along with{" "}
+            {partyEntryCount > 0 && (
+              <>
+                <strong>{partyEntryCount}</strong> {partyEntryCount === 1 ? "entry" : "entries"}
+              </>
+            )}
+            {partyEntryCount > 0 && partyInvoiceCount > 0 && " and "}
+            {partyInvoiceCount > 0 && (
+              <>
+                <strong>{partyInvoiceCount}</strong> {partyInvoiceCount === 1 ? "invoice" : "invoices"}
+              </>
+            )}{" "}
+            recorded against it. This cannot be undone.
           </p>
         ) : (
           <p className="text-sm text-navy-600">

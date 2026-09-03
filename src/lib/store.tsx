@@ -113,10 +113,31 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     [db, commit, upsert]
   );
 
+  /**
+   * Deleting a party takes its entries and invoices with it.
+   *
+   * The database's foreign keys restrict deleting a party that still has
+   * entries or invoices pointing at it — without this, a party with any
+   * trip history could never be removed. Children go first so the party
+   * delete never hits that restriction.
+   */
   const deleteParty = useCallback(
     async (id: string) => {
-      await commit({ ...db, parties: db.parties.filter((p) => p.id !== id) }, () =>
-        repo.remove("parties", id)
+      const removedEntryIds = db.entries.filter((e) => e.partyId === id).map((e) => e.id);
+      const removedInvoiceIds = db.invoices.filter((i) => i.partyId === id).map((i) => i.id);
+
+      await commit(
+        {
+          ...db,
+          parties: db.parties.filter((p) => p.id !== id),
+          entries: db.entries.filter((e) => e.partyId !== id),
+          invoices: db.invoices.filter((i) => i.partyId !== id),
+        },
+        async () => {
+          for (const eid of removedEntryIds) await repo.remove("entries", eid);
+          for (const iid of removedInvoiceIds) await repo.remove("invoices", iid);
+          await repo.remove("parties", id);
+        }
       );
     },
     [db, commit]
@@ -283,10 +304,11 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     [commit]
   );
 
+  /** Wipes everything, company profile included — a true factory reset. */
   const resetAll = useCallback(async () => {
-    const next: DB = { ...EMPTY, company: db.company };
+    const next: DB = { ...EMPTY, company: { ...DEFAULT_COMPANY } };
     await commit(next, () => repo.replaceAll(next));
-  }, [db.company, commit]);
+  }, [commit]);
 
   const partyById = useMemo(() => new Map(db.parties.map((p) => [p.id, p])), [db.parties]);
   const driverById = useMemo(() => new Map(db.drivers.map((d) => [d.id, d])), [db.drivers]);
