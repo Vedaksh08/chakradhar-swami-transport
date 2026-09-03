@@ -28,11 +28,12 @@ import {
   Stat,
   Table,
   Textarea,
+  cx,
 } from "@/components/ui";
 
 export default function InvoicesPage() {
   const store = useStore();
-  const { invoices, parties, entries, partyName } = store;
+  const { invoices, parties, entries, partyName, companyName } = store;
   const search = useSearchParams();
 
   const [q, setQ] = useState("");
@@ -40,12 +41,17 @@ export default function InvoicesPage() {
   const [isNew, setIsNew] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState<Invoice | null>(null);
 
-  const openNew = (partyId = "") => {
+  const openNew = (opts: { partyId?: string; companyId?: string } = {}) => {
     setDraft({
       id: uid(),
-      invoiceNo: partyId ? store.nextInvoiceNo(partyId, today()) : "",
+      invoiceNo: opts.partyId
+        ? store.nextInvoiceNo(opts.partyId, today())
+        : opts.companyId
+          ? store.nextInvoiceNoForCompany(opts.companyId, today())
+          : "",
       date: today(),
-      partyId,
+      partyId: opts.companyId ? undefined : opts.partyId,
+      companyId: opts.companyId,
       fromDate: startOfMonth(),
       toDate: today(),
       entryIds: [],
@@ -57,19 +63,23 @@ export default function InvoicesPage() {
     setIsNew(true);
   };
 
-  // Deep link from the Parties tab: /invoices?party=<id>
+  const billedTo = (i: Invoice) => (i.companyId ? companyName(i.companyId) : partyName(i.partyId));
+
+  // Deep links: /invoices?party=<id> from Parties, /invoices?company=<id> from Companies.
   useEffect(() => {
     const p = search.get("party");
-    if (p && parties.some((x) => x.id === p)) openNew(p);
+    const c = search.get("company");
+    if (c && store.companies.some((x) => x.id === c)) openNew({ companyId: c });
+    else if (p && parties.some((x) => x.id === p)) openNew({ partyId: p });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [search, parties.length]);
+  }, [search, parties.length, store.companies.length]);
 
   const filtered = useMemo(() => {
     const n = q.trim().toLowerCase();
     return invoices
-      .filter((i) => (!n ? true : `${i.invoiceNo} ${partyName(i.partyId)}`.toLowerCase().includes(n)))
+      .filter((i) => (!n ? true : `${i.invoiceNo} ${billedTo(i)}`.toLowerCase().includes(n)))
       .sort((a, b) => b.date.localeCompare(a.date) || b.createdAt.localeCompare(a.createdAt));
-  }, [invoices, q, partyName]);
+  }, [invoices, q, partyName, companyName]);
 
   const totalBilled = useMemo(() => invoices.reduce((s, i) => s + i.total, 0), [invoices]);
   const unbilledValue = useMemo(
@@ -81,7 +91,7 @@ export default function InvoicesPage() {
     <>
       <PageHeader
         title="Invoices"
-        subtitle="Pick a party and a date range — every entry in that window rolls into one bill."
+        subtitle="Pick a party (or a company, to bill several parties at once) and a date range."
         actions={
           <button onClick={() => openNew()} className="btn-primary" disabled={!parties.length}>
             <Plus size={16} /> Create invoice
@@ -107,7 +117,7 @@ export default function InvoicesPage() {
             <Input
               value={q}
               onChange={(e) => setQ(e.target.value)}
-              placeholder="Search invoice no. or party…"
+              placeholder="Search invoice no., party or company…"
               className="pl-9"
             />
           </div>
@@ -136,7 +146,7 @@ export default function InvoicesPage() {
               <>
                 <th className="th">Invoice No</th>
                 <th className="th">Date</th>
-                <th className="th">Party</th>
+                <th className="th">Billed to</th>
                 <th className="th">Period</th>
                 <th className="th text-right">Entries</th>
                 <th className="th text-right">Freight</th>
@@ -154,7 +164,14 @@ export default function InvoicesPage() {
                   </Link>
                 </td>
                 <td className="td">{fmtDate(i.date)}</td>
-                <td className="td max-w-[220px] truncate">{partyName(i.partyId)}</td>
+                <td className="td max-w-[220px] truncate">
+                  {billedTo(i)}
+                  {i.companyId && (
+                    <span className="ml-1.5 rounded bg-navy-100 px-1.5 py-0.5 text-[10px] font-bold uppercase text-navy-500">
+                      Company
+                    </span>
+                  )}
+                </td>
                 <td className="td text-xs text-navy-500">
                   {fmtDate(i.fromDate)} → {fmtDate(i.toDate)}
                 </td>
@@ -246,6 +263,8 @@ export default function InvoicesPage() {
 
 /* ------------------------------------------------------------------ builder */
 
+type BillMode = "party" | "company";
+
 function InvoiceBuilder({
   draft: initial,
   isNew,
@@ -256,30 +275,47 @@ function InvoiceBuilder({
   onClose: () => void;
 }) {
   const store = useStore();
-  const { parties, entriesFor, partyName } = store;
+  const { parties, companies, entriesFor, entriesForCompany, partyName, companyName } = store;
   const [inv, setInv] = useState<Invoice>(initial);
-  const [excluded, setExcluded] = useState<Set<string>>(() => {
-    // Editing: anything previously in range but not on the invoice stays excluded.
-    if (isNew) return new Set();
-    return new Set();
-  });
+  const [mode, setMode] = useState<BillMode>(initial.companyId ? "company" : "party");
+  const [excluded, setExcluded] = useState<Set<string>>(() => new Set());
 
   const set = <K extends keyof Invoice>(k: K, v: Invoice[K]) => setInv((p) => ({ ...p, [k]: v }));
 
-  // The number is built from the party's code and the invoice's financial year,
-  // so it has to be rebuilt when either changes — unless it's been hand-edited.
+  const billToId = mode === "company" ? inv.companyId : inv.partyId;
+
+  function switchMode(next: BillMode) {
+    if (next === mode) return;
+    setMode(next);
+    setExcluded(new Set());
+    setNumberTouched(false);
+    setInv((p) => ({
+      ...p,
+      partyId: next === "party" ? p.partyId : undefined,
+      companyId: next === "company" ? p.companyId : undefined,
+    }));
+  }
+
+  // The number is built from the party's/company's code and the invoice's
+  // financial year, so it has to be rebuilt when either changes — unless
+  // it's been hand-edited.
   const [numberTouched, setNumberTouched] = useState(!isNew);
   useEffect(() => {
-    if (numberTouched || !inv.partyId) return;
-    const next = store.nextInvoiceNo(inv.partyId, inv.date);
+    if (numberTouched || !billToId) return;
+    const next =
+      mode === "company"
+        ? store.nextInvoiceNoForCompany(billToId, inv.date)
+        : store.nextInvoiceNo(billToId, inv.date);
     if (next !== inv.invoiceNo) setInv((p) => ({ ...p, invoiceNo: next }));
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [inv.partyId, inv.date, numberTouched]);
+  }, [billToId, inv.date, numberTouched, mode]);
 
-  const candidates: Entry[] = useMemo(
-    () => (inv.partyId ? entriesFor(inv.partyId, inv.fromDate, inv.toDate, isNew ? undefined : inv.id) : []),
-    [inv.partyId, inv.fromDate, inv.toDate, inv.id, isNew, entriesFor]
-  );
+  const candidates: Entry[] = useMemo(() => {
+    if (!billToId) return [];
+    return mode === "company"
+      ? entriesForCompany(billToId, inv.fromDate, inv.toDate, isNew ? undefined : inv.id)
+      : entriesFor(billToId, inv.fromDate, inv.toDate, isNew ? undefined : inv.id);
+  }, [mode, billToId, inv.fromDate, inv.toDate, inv.id, isNew, entriesFor, entriesForCompany]);
 
   const selected = useMemo(
     () => candidates.filter((e) => !excluded.has(e.id)),
@@ -297,7 +333,13 @@ function InvoiceBuilder({
   const total = round2(freight + gst);
 
   const party = parties.find((p) => p.id === inv.partyId);
-  const valid = Boolean(inv.partyId && inv.invoiceNo.trim() && selected.length);
+  const billedCompany = companies.find((c) => c.id === inv.companyId);
+  const billTo = mode === "company" ? billedCompany : party;
+  const companyParties = useMemo(
+    () => (billedCompany ? parties.filter((p) => p.companyId === billedCompany.id) : []),
+    [billedCompany, parties]
+  );
+  const valid = Boolean(billToId && inv.invoiceNo.trim() && selected.length);
 
   async function save() {
     if (!valid) return;
@@ -305,6 +347,8 @@ function InvoiceBuilder({
       {
         ...inv,
         invoiceNo: inv.invoiceNo.trim(),
+        partyId: mode === "party" ? inv.partyId : undefined,
+        companyId: mode === "company" ? inv.companyId : undefined,
         entryIds: selected.map((e) => e.id),
         freightAmount: freight,
         total,
@@ -340,9 +384,9 @@ function InvoiceBuilder({
             hint={
               numberTouched
                 ? "Edited by hand"
-                : inv.partyId
-                  ? "Built from the party code + year"
-                  : "Pick a party to number it"
+                : billToId
+                  ? `Built from the ${mode === "company" ? "company" : "party"} code + year`
+                  : `Pick a ${mode} to number it`
             }
           >
             <Input
@@ -369,25 +413,75 @@ function InvoiceBuilder({
           </Field>
         </div>
 
-        <Field label="Bill to party" required>
-          <Select value={inv.partyId} onChange={(e) => set("partyId", e.target.value)}>
-            <option value="">Select party…</option>
-            {parties.map((p) => (
-              <option key={p.id} value={p.id}>
-                {p.name}
-              </option>
-            ))}
-          </Select>
+        <Field label="Bill to" required>
+          <div className="grid gap-2 sm:grid-cols-[auto_1fr] sm:items-start">
+            <div className="inline-flex rounded-lg bg-navy-100 p-1">
+              <button
+                type="button"
+                onClick={() => switchMode("party")}
+                className={cx(
+                  "rounded-md px-3.5 py-1.5 text-xs font-bold transition",
+                  mode === "party" ? "bg-white text-navy-900 shadow-sm" : "text-navy-500"
+                )}
+              >
+                Party
+              </button>
+              <button
+                type="button"
+                onClick={() => switchMode("company")}
+                className={cx(
+                  "rounded-md px-3.5 py-1.5 text-xs font-bold transition",
+                  mode === "company" ? "bg-white text-navy-900 shadow-sm" : "text-navy-500"
+                )}
+                disabled={!companies.length}
+                title={companies.length ? undefined : "No companies yet"}
+              >
+                Company
+              </button>
+            </div>
+
+            {mode === "party" ? (
+              <Select value={inv.partyId ?? ""} onChange={(e) => set("partyId", e.target.value)}>
+                <option value="">Select party…</option>
+                {parties.map((p) => (
+                  <option key={p.id} value={p.id}>
+                    {p.name}
+                  </option>
+                ))}
+              </Select>
+            ) : (
+              <Select
+                value={inv.companyId ?? ""}
+                onChange={(e) => set("companyId", e.target.value)}
+              >
+                <option value="">Select company…</option>
+                {companies.map((c) => (
+                  <option key={c.id} value={c.id}>
+                    {c.name}
+                  </option>
+                ))}
+              </Select>
+            )}
+          </div>
         </Field>
 
-        {party && (
+        {billTo && (
           <div className="rounded-lg border border-navy-200 bg-navy-50/50 px-4 py-3 text-sm">
-            <p className="font-bold text-navy-900">{party.name}</p>
-            {party.address && (
-              <p className="whitespace-pre-line text-navy-600">{party.address}</p>
+            <p className="font-bold text-navy-900">{billTo.name}</p>
+            {billTo.address && (
+              <p className="whitespace-pre-line text-navy-600">{billTo.address}</p>
             )}
-            {party.gstin && (
-              <p className="mt-1 font-mono text-xs text-navy-500">GSTIN: {party.gstin}</p>
+            {billTo.gstin && (
+              <p className="mt-1 font-mono text-xs text-navy-500">GSTIN: {billTo.gstin}</p>
+            )}
+            {mode === "company" && (
+              <p className="mt-2 text-xs text-navy-500">
+                Pulls entries from{" "}
+                {companyParties.length === 0
+                  ? "no parties yet"
+                  : companyParties.map((p) => p.name).join(", ")}
+                .
+              </p>
             )}
           </div>
         )}
@@ -418,14 +512,15 @@ function InvoiceBuilder({
             )}
           </header>
 
-          {!inv.partyId ? (
+          {!billToId ? (
             <p className="px-4 py-8 text-center text-sm text-navy-400">
-              Choose a party to see its entries.
+              Choose a {mode} to see its entries.
             </p>
           ) : candidates.length === 0 ? (
             <p className="px-4 py-8 text-center text-sm text-navy-400">
-              No unbilled entries for {partyName(inv.partyId)} between {fmtDate(inv.fromDate)} and{" "}
-              {fmtDate(inv.toDate)}.
+              No unbilled entries for{" "}
+              {mode === "company" ? companyName(billToId) : partyName(billToId)} between{" "}
+              {fmtDate(inv.fromDate)} and {fmtDate(inv.toDate)}.
             </p>
           ) : (
             <div className="max-h-72 overflow-y-auto">
@@ -434,6 +529,7 @@ function InvoiceBuilder({
                   <>
                     <th className="th w-10"></th>
                     <th className="th">Date</th>
+                    {mode === "company" && <th className="th">Party</th>}
                     <th className="th">Inv. No</th>
                     <th className="th">Vehicle</th>
                     <th className="th text-right">Qty</th>
@@ -462,6 +558,11 @@ function InvoiceBuilder({
                         />
                       </td>
                       <td className="td">{fmtDate(e.date)}</td>
+                      {mode === "company" && (
+                        <td className="td max-w-[160px] truncate text-xs text-navy-500">
+                          {partyName(e.partyId)}
+                        </td>
+                      )}
                       <td className="td font-semibold">{e.invoiceNo}</td>
                       <td className="td font-mono text-xs">{e.vehicleNo}</td>
                       <td className="td tabular text-right">{e.qty ? e.qty.toFixed(3) : "—"}</td>

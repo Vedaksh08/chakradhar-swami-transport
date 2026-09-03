@@ -1,7 +1,7 @@
 "use client";
 
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useState } from "react";
-import type { CompanyProfile, DB, Driver, Entry, Invoice, Party, Vehicle } from "./types";
+import type { Company, CompanyProfile, DB, Driver, Entry, Invoice, Party, Vehicle } from "./types";
 import { DEFAULT_COMPANY, repo, type TableName } from "./repo";
 import { buildInvoiceNo, entryTotal, inRange, num, round2, uid } from "./calc";
 
@@ -12,6 +12,7 @@ interface StoreValue {
   db: DB;
 
   parties: Party[];
+  companies: Company[];
   drivers: Driver[];
   vehicles: Vehicle[];
   entries: Entry[];
@@ -19,6 +20,7 @@ interface StoreValue {
   company: CompanyProfile;
 
   partyName: (id?: string) => string;
+  companyName: (id?: string) => string;
   driverName: (id?: string) => string;
   /** Every registration seen — fleet records plus anything typed on an entry. */
   vehicleNumbers: string[];
@@ -26,6 +28,8 @@ interface StoreValue {
 
   saveParty: (p: Party) => Promise<void>;
   deleteParty: (id: string) => Promise<void>;
+  saveCompanyEntity: (c: Company) => Promise<void>;
+  deleteCompanyEntity: (id: string) => Promise<void>;
   saveDriver: (d: Driver) => Promise<void>;
   deleteDriver: (id: string) => Promise<void>;
   saveVehicle: (v: Vehicle) => Promise<void>;
@@ -34,12 +38,21 @@ interface StoreValue {
   deleteEntry: (id: string) => Promise<void>;
   saveInvoice: (i: Invoice, linkedEntryIds: string[]) => Promise<void>;
   deleteInvoice: (id: string) => Promise<void>;
-  saveCompany: (c: CompanyProfile) => Promise<void>;
+  /** Your own letterhead details, printed on every invoice. */
+  saveCompanyProfile: (c: CompanyProfile) => Promise<void>;
 
   /** Unbilled entries for a party inside a date range — what an invoice pulls in. */
   entriesFor: (partyId: string, from: string, to: string, includeInvoiceId?: string) => Entry[];
+  /** Same, but across every party under a billing company. */
+  entriesForCompany: (
+    companyId: string,
+    from: string,
+    to: string,
+    includeInvoiceId?: string
+  ) => Entry[];
   /** Next invoice number in the CST/MTC/01/26-27 house format. */
   nextInvoiceNo: (partyId: string, dateISO: string) => string;
+  nextInvoiceNoForCompany: (companyId: string, dateISO: string) => string;
   nextEntryInvoiceNo: () => string;
 
   importDB: (db: DB) => Promise<void>;
@@ -50,12 +63,52 @@ const Ctx = createContext<StoreValue | null>(null);
 
 const EMPTY: DB = {
   parties: [],
+  companies: [],
   drivers: [],
   vehicles: [],
   entries: [],
   invoices: [],
   company: DEFAULT_COMPANY,
 };
+
+/**
+ * Drops the given entries from every invoice that references them and
+ * re-totals what's left. Shared by single-entry deletion and by cascading
+ * deletes (party, company) that take a batch of entries with them — without
+ * this, an invoice would keep dead ids in `entryIds` and a total that no
+ * longer matches its own annexure.
+ */
+function recomputeInvoices(
+  invoices: Invoice[],
+  removedEntryIds: Set<string>,
+  remainingById: Map<string, Entry>
+): { nextInvoices: Invoice[]; touched: Invoice[] } {
+  const touched: Invoice[] = [];
+  const nextInvoices = invoices.map((inv) => {
+    if (!inv.entryIds.some((id) => removedEntryIds.has(id))) return inv;
+
+    const entryIds = inv.entryIds.filter((id) => !removedEntryIds.has(id));
+    const freightAmount = round2(
+      entryIds.reduce((sum, eid) => {
+        const e = remainingById.get(eid);
+        return sum + (e ? entryTotal(e) : 0);
+      }, 0)
+    );
+    const gst = inv.gstPaidByParty
+      ? 0
+      : round2((freightAmount * (num(inv.sgstPercent) + num(inv.cgstPercent))) / 100);
+
+    const updated: Invoice = {
+      ...inv,
+      entryIds,
+      freightAmount,
+      total: round2(freightAmount + gst),
+    };
+    touched.push(updated);
+    return updated;
+  });
+  return { nextInvoices, touched };
+}
 
 export function StoreProvider({ children }: { children: React.ReactNode }) {
   const [db, setDb] = useState<DB>(EMPTY);
@@ -114,7 +167,10 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
   );
 
   /**
-   * Deleting a party takes its entries and invoices with it.
+   * Deleting a party takes its entries with it, and any invoice billed
+   * directly to it. Invoices billed to a *company* that happened to include
+   * this party's entries aren't deleted — they're re-totalled, the same way
+   * a single entry delete re-totals its invoice.
    *
    * The database's foreign keys restrict deleting a party that still has
    * entries or invoices pointing at it — without this, a party with any
@@ -123,20 +179,89 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
    */
   const deleteParty = useCallback(
     async (id: string) => {
-      const removedEntryIds = db.entries.filter((e) => e.partyId === id).map((e) => e.id);
-      const removedInvoiceIds = db.invoices.filter((i) => i.partyId === id).map((i) => i.id);
+      const removedEntryIds = new Set(
+        db.entries.filter((e) => e.partyId === id).map((e) => e.id)
+      );
+      const nextEntries = db.entries.filter((e) => !removedEntryIds.has(e.id));
+      const remainingById = new Map(nextEntries.map((e) => [e.id, e]));
+
+      const directInvoiceIds = db.invoices.filter((i) => i.partyId === id).map((i) => i.id);
+      const otherInvoices = db.invoices.filter((i) => i.partyId !== id);
+      const { nextInvoices, touched } = recomputeInvoices(
+        otherInvoices,
+        removedEntryIds,
+        remainingById
+      );
 
       await commit(
         {
           ...db,
           parties: db.parties.filter((p) => p.id !== id),
-          entries: db.entries.filter((e) => e.partyId !== id),
-          invoices: db.invoices.filter((i) => i.partyId !== id),
+          entries: nextEntries,
+          invoices: nextInvoices,
         },
         async () => {
           for (const eid of removedEntryIds) await repo.remove("entries", eid);
-          for (const iid of removedInvoiceIds) await repo.remove("invoices", iid);
+          for (const iid of directInvoiceIds) await repo.remove("invoices", iid);
+          for (const inv of touched) await repo.update("invoices", inv);
           await repo.remove("parties", id);
+        }
+      );
+    },
+    [db, commit]
+  );
+
+  const saveCompanyEntity = useCallback(
+    async (c: Company) => {
+      const { nextList, exists } = upsert("companies", db.companies, c);
+      await commit({ ...db, companies: nextList }, () =>
+        exists ? repo.update("companies", c) : repo.insert("companies", c)
+      );
+    },
+    [db, commit, upsert]
+  );
+
+  /**
+   * Deleting a company ungroups its parties (they, and their entries and
+   * trip history, are untouched) but removes any invoice billed to the
+   * company — a bill made out to a company that no longer exists doesn't
+   * mean anything. Those entries go back to the unbilled pool, same as
+   * deleting any other invoice.
+   */
+  const deleteCompanyEntity = useCallback(
+    async (id: string) => {
+      const ownInvoiceIds = db.invoices.filter((i) => i.companyId === id).map((i) => i.id);
+      const ownInvoiceIdSet = new Set(ownInvoiceIds);
+
+      const releasedEntries: Entry[] = [];
+      const nextEntries = db.entries.map((e) => {
+        if (!e.invoiceId || !ownInvoiceIdSet.has(e.invoiceId)) return e;
+        const u = { ...e, invoiceId: undefined };
+        releasedEntries.push(u);
+        return u;
+      });
+
+      const ungroupedParties: Party[] = [];
+      const nextParties = db.parties.map((p) => {
+        if (p.companyId !== id) return p;
+        const u = { ...p, companyId: undefined };
+        ungroupedParties.push(u);
+        return u;
+      });
+
+      await commit(
+        {
+          ...db,
+          companies: db.companies.filter((c) => c.id !== id),
+          parties: nextParties,
+          invoices: db.invoices.filter((i) => i.companyId !== id),
+          entries: nextEntries,
+        },
+        async () => {
+          for (const e of releasedEntries) await repo.update("entries", e);
+          for (const iid of ownInvoiceIds) await repo.remove("invoices", iid);
+          for (const p of ungroupedParties) await repo.update("parties", p);
+          await repo.remove("companies", id);
         }
       );
     },
@@ -204,31 +329,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     async (id: string) => {
       const nextEntries = db.entries.filter((e) => e.id !== id);
       const byId = new Map(nextEntries.map((e) => [e.id, e]));
-
-      const touched: Invoice[] = [];
-      const nextInvoices = db.invoices.map((inv) => {
-        if (!inv.entryIds.includes(id)) return inv;
-
-        const entryIds = inv.entryIds.filter((x) => x !== id);
-        const freightAmount = round2(
-          entryIds.reduce((sum, eid) => {
-            const e = byId.get(eid);
-            return sum + (e ? entryTotal(e) : 0);
-          }, 0)
-        );
-        const gst = inv.gstPaidByParty
-          ? 0
-          : round2((freightAmount * (num(inv.sgstPercent) + num(inv.cgstPercent))) / 100);
-
-        const updated: Invoice = {
-          ...inv,
-          entryIds,
-          freightAmount,
-          total: round2(freightAmount + gst),
-        };
-        touched.push(updated);
-        return updated;
-      });
+      const { nextInvoices, touched } = recomputeInvoices(db.invoices, new Set([id]), byId);
 
       await commit({ ...db, entries: nextEntries, invoices: nextInvoices }, async () => {
         await repo.remove("entries", id);
@@ -290,7 +391,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     [db, commit]
   );
 
-  const saveCompany = useCallback(
+  const saveCompanyProfile = useCallback(
     async (c: CompanyProfile) => {
       await commit({ ...db, company: c }, () => repo.saveCompany(c));
     },
@@ -311,6 +412,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
   }, [commit]);
 
   const partyById = useMemo(() => new Map(db.parties.map((p) => [p.id, p])), [db.parties]);
+  const companyById = useMemo(() => new Map(db.companies.map((c) => [c.id, c])), [db.companies]);
   const driverById = useMemo(() => new Map(db.drivers.map((d) => [d.id, d])), [db.drivers]);
 
   const vehicleNumbers = useMemo(() => {
@@ -340,6 +442,24 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     [db.entries]
   );
 
+  /** Same as `entriesFor`, but pooled across every party under a company. */
+  const entriesForCompany = useCallback(
+    (companyId: string, from: string, to: string, includeInvoiceId?: string) => {
+      const memberIds = new Set(
+        db.parties.filter((p) => p.companyId === companyId).map((p) => p.id)
+      );
+      return db.entries
+        .filter(
+          (e) =>
+            memberIds.has(e.partyId) &&
+            inRange(e.date, from, to) &&
+            (!e.invoiceId || e.invoiceId === includeInvoiceId)
+        )
+        .sort((a, b) => a.date.localeCompare(b.date));
+    },
+    [db.entries, db.parties]
+  );
+
   /** Next number in the house format, e.g. CST/MTC/01/26-27. */
   const nextInvoiceNo = useCallback(
     (partyId: string, dateISO: string) =>
@@ -351,6 +471,19 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
         partyId
       ),
     [db.invoices, db.company.invoicePrefix, partyById]
+  );
+
+  /** Same, but numbering off the company's code and its own invoice history. */
+  const nextInvoiceNoForCompany = useCallback(
+    (companyId: string, dateISO: string) =>
+      buildInvoiceNo(
+        db.company.invoicePrefix ?? "CST",
+        companyById.get(companyId)?.code,
+        dateISO,
+        db.invoices,
+        companyId
+      ),
+    [db.invoices, db.company.invoicePrefix, companyById]
   );
 
   const nextEntryInvoiceNo = useCallback(() => {
@@ -368,17 +501,21 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     backend: repo.kind,
     db,
     parties: db.parties,
+    companies: db.companies,
     drivers: db.drivers,
     vehicles: db.vehicles,
     entries: db.entries,
     invoices: db.invoices,
     company: db.company,
     partyName: (id) => (id && partyById.get(id)?.name) || "—",
+    companyName: (id) => (id && companyById.get(id)?.name) || "—",
     driverName: (id) => (id && driverById.get(id)?.name) || "—",
     vehicleNumbers,
     consignees,
     saveParty,
     deleteParty,
+    saveCompanyEntity,
+    deleteCompanyEntity,
     saveDriver,
     deleteDriver,
     saveVehicle,
@@ -387,9 +524,11 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     deleteEntry,
     saveInvoice,
     deleteInvoice,
-    saveCompany,
+    saveCompanyProfile,
     entriesFor,
+    entriesForCompany,
     nextInvoiceNo,
+    nextInvoiceNoForCompany,
     nextEntryInvoiceNo,
     importDB,
     resetAll,

@@ -1,7 +1,7 @@
 import type { CompanyProfile, DB, Entry } from "./types";
 import { getSupabase, supabaseConfigured } from "./supabase";
 
-export type TableName = "parties" | "drivers" | "vehicles" | "entries" | "invoices";
+export type TableName = "parties" | "companies" | "drivers" | "vehicles" | "entries" | "invoices";
 
 export const DEFAULT_COMPANY: CompanyProfile = {
   shree: "श्री",
@@ -20,6 +20,7 @@ const STORAGE_KEY = "cst.transport.db.v1";
 function emptyDB(): DB {
   return {
     parties: [],
+    companies: [],
     drivers: [],
     vehicles: [],
     entries: [],
@@ -83,6 +84,7 @@ class LocalRepo implements Repo {
       const parsed = JSON.parse(raw) as Partial<DB>;
       return {
         parties: parsed.parties ?? [],
+        companies: parsed.companies ?? [],
         drivers: parsed.drivers ?? [],
         vehicles: parsed.vehicles ?? [],
         entries: (parsed.entries ?? []).map(normaliseEntry),
@@ -148,8 +150,9 @@ class SupabaseRepo implements Repo {
 
   async load(): Promise<DB> {
     const sb = getSupabase()!;
-    const [parties, drivers, vehicles, entries, invoices, company] = await Promise.all([
+    const [parties, companies, drivers, vehicles, entries, invoices, company] = await Promise.all([
       sb.from("parties").select("*"),
+      sb.from("companies").select("*"),
       sb.from("drivers").select("*"),
       sb.from("vehicles").select("*"),
       sb.from("entries").select("*"),
@@ -157,11 +160,17 @@ class SupabaseRepo implements Repo {
       sb.from("company").select("*").eq("id", 1).maybeSingle(),
     ]);
     const err =
-      parties.error || drivers.error || vehicles.error || entries.error || invoices.error;
+      parties.error ||
+      companies.error ||
+      drivers.error ||
+      vehicles.error ||
+      entries.error ||
+      invoices.error;
     if (err) throw err;
 
     return {
       parties: parties.data ?? [],
+      companies: companies.data ?? [],
       drivers: drivers.data ?? [],
       vehicles: vehicles.data ?? [],
       entries: (entries.data ?? []).map(normaliseEntry),
@@ -194,7 +203,15 @@ class SupabaseRepo implements Repo {
     const sb = getSupabase()!;
 
     // Children before parents, so foreign keys never block the wipe.
-    for (const t of ["entries", "invoices", "parties", "drivers", "vehicles"] as TableName[]) {
+    const wipeOrder: TableName[] = [
+      "entries",
+      "invoices",
+      "parties",
+      "companies",
+      "drivers",
+      "vehicles",
+    ];
+    for (const t of wipeOrder) {
       const { error } = await sb.from(t).delete().neq("id", "");
       // Surface it — a silent failure here would look like a successful wipe.
       if (error) throw new Error(`Could not clear ${t}: ${error.message}`);
@@ -206,6 +223,8 @@ class SupabaseRepo implements Repo {
       if (error) throw new Error(`Could not restore ${t}: ${error.message}`);
     };
 
+    // Companies before parties — parties can reference a company by id.
+    await seed("companies", db.companies);
     await seed("parties", db.parties);
     await seed("drivers", db.drivers);
     await seed("vehicles", db.vehicles);

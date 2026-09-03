@@ -112,26 +112,30 @@ export function settleMonth(
  *   CST / MTC / 01 / 26-27
  *   ^     ^     ^    ^
  *   |     |     |    financial year of the invoice date
- *   |     |     serial for that party within that year
- *   |     party's short code
+ *   |     |     serial for whoever is billed, within that year
+ *   |     the party's (or company's) short code
  *   company prefix
  *
- * The serial restarts each financial year, per party, so numbering stays
- * readable on a shelf of paper files.
+ * The serial restarts each financial year, per party or company, so
+ * numbering stays readable on a shelf of paper files. `billToId` is a
+ * party id for a party-billed invoice, or a company id for one billed to a
+ * company — `existing` rows are matched on whichever of the two they carry.
  */
 export function buildInvoiceNo(
   prefix: string,
-  partyCode: string | undefined,
+  billToCode: string | undefined,
   dateISO: string,
-  existing: { invoiceNo: string; partyId: string; date: string }[],
-  partyId: string
+  existing: { invoiceNo: string; partyId?: string; companyId?: string; date: string }[],
+  billToId: string
 ): string {
   const head = (prefix || "CST").trim().toUpperCase();
-  const code = (partyCode || "").trim().toUpperCase();
+  const code = (billToCode || "").trim().toUpperCase();
   const fy = fyLabel(dateISO);
 
-  // Count this party's invoices already in the same financial year.
-  const used = existing.filter((i) => i.partyId === partyId && fyLabel(i.date) === fy);
+  // Count this party's (or company's) invoices already in the same financial year.
+  const used = existing.filter(
+    (i) => (i.companyId || i.partyId) === billToId && fyLabel(i.date) === fy
+  );
 
   // Prefer continuing from the highest serial actually seen, so gaps from
   // deletions don't cause a collision.

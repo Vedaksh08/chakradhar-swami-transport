@@ -2,58 +2,73 @@
 
 import { useMemo, useState } from "react";
 import Link from "next/link";
-import { Building2, Plus, Pencil, Trash2, Search, FileText } from "lucide-react";
-import type { Party } from "@/lib/types";
+import { Landmark, Plus, Pencil, Trash2, Search, FileText } from "lucide-react";
+import type { Company } from "@/lib/types";
 import { useStore } from "@/lib/store";
-import { entryTotal, fyLabel, inr, today, uid } from "@/lib/calc";
+import { entryTotal, inr, today, uid } from "@/lib/calc";
 import {
   Card,
-  Chip,
   EmptyState,
   Field,
   Input,
   Modal,
   PageHeader,
-  Select,
   Stat,
   Table,
   Textarea,
 } from "@/components/ui";
 
-function blankParty(): Party {
+function blankCompany(): Company {
   return { id: uid(), name: "", createdAt: new Date().toISOString() };
 }
 
-export default function PartiesPage() {
+export default function CompaniesPage() {
   const store = useStore();
-  const { parties, entries, company, companies, companyName } = store;
+  const { companies, parties, entries, invoices } = store;
 
   const [q, setQ] = useState("");
-  const [draft, setDraft] = useState<Party | null>(null);
+  const [draft, setDraft] = useState<Company | null>(null);
   const [isNew, setIsNew] = useState(false);
-  const [confirmDelete, setConfirmDelete] = useState<Party | null>(null);
+  const [confirmDelete, setConfirmDelete] = useState<Company | null>(null);
 
-  /** Trip count + billed value per party. */
+  /** Member parties, trip count and billed value per company. */
   const stats = useMemo(() => {
-    const m = new Map<string, { trips: number; total: number; unbilled: number }>();
-    for (const e of entries) {
-      const s = m.get(e.partyId) ?? { trips: 0, total: 0, unbilled: 0 };
-      s.trips += 1;
-      s.total += entryTotal(e);
-      if (!e.invoiceId) s.unbilled += entryTotal(e);
-      m.set(e.partyId, s);
+    const membersByCompany = new Map<string, Set<string>>();
+    for (const p of parties) {
+      if (!p.companyId) continue;
+      if (!membersByCompany.has(p.companyId)) membersByCompany.set(p.companyId, new Set());
+      membersByCompany.get(p.companyId)!.add(p.id);
+    }
+
+    const m = new Map<
+      string,
+      { members: number; trips: number; total: number; unbilled: number; invoices: number }
+    >();
+    for (const c of companies) {
+      const memberIds = membersByCompany.get(c.id) ?? new Set<string>();
+      let trips = 0;
+      let total = 0;
+      let unbilled = 0;
+      for (const e of entries) {
+        if (!memberIds.has(e.partyId)) continue;
+        trips += 1;
+        total += entryTotal(e);
+        if (!e.invoiceId) unbilled += entryTotal(e);
+      }
+      const invoiceCount = invoices.filter((i) => i.companyId === c.id).length;
+      m.set(c.id, { members: memberIds.size, trips, total, unbilled, invoices: invoiceCount });
     }
     return m;
-  }, [entries]);
+  }, [companies, parties, entries, invoices]);
 
   const filtered = useMemo(() => {
     const n = q.trim().toLowerCase();
-    return parties
-      .filter((p) =>
-        !n ? true : [p.name, p.address, p.gstin, p.contactPerson].join(" ").toLowerCase().includes(n)
+    return companies
+      .filter((c) =>
+        !n ? true : [c.name, c.address, c.gstin, c.contactPerson].join(" ").toLowerCase().includes(n)
       )
       .sort((a, b) => a.name.localeCompare(b.name));
-  }, [parties, q]);
+  }, [companies, q]);
 
   const totalUnbilled = useMemo(
     () => [...stats.values()].reduce((s, x) => s + x.unbilled, 0),
@@ -64,38 +79,34 @@ export default function PartiesPage() {
 
   async function save() {
     if (!draft || !valid) return;
-    await store.saveParty({ ...draft, name: draft.name.trim() });
+    await store.saveCompanyEntity({ ...draft, name: draft.name.trim() });
     setDraft(null);
   }
 
-  const partyEntryCount = confirmDelete
-    ? entries.filter((e) => e.partyId === confirmDelete.id).length
-    : 0;
-  const partyInvoiceCount = confirmDelete
-    ? store.invoices.filter((i) => i.partyId === confirmDelete.id).length
-    : 0;
+  const companyMemberCount = confirmDelete ? stats.get(confirmDelete.id)?.members ?? 0 : 0;
+  const companyInvoiceCount = confirmDelete ? stats.get(confirmDelete.id)?.invoices ?? 0 : 0;
 
   return (
     <>
       <PageHeader
-        title="Parties"
-        subtitle="The companies you bill. Their details flow onto every invoice automatically."
+        title="Companies"
+        subtitle="Group parties under one company — bill the company, entries still track by party."
         actions={
           <button
             onClick={() => {
-              setDraft(blankParty());
+              setDraft(blankCompany());
               setIsNew(true);
             }}
             className="btn-primary"
           >
-            <Plus size={16} /> New party
+            <Plus size={16} /> New company
           </button>
         }
       />
 
       <div className="stagger mb-5 grid grid-cols-2 gap-3 sm:grid-cols-3 sm:gap-4">
-        <Stat label="Parties" value={parties.length} />
-        <Stat label="Total trips" value={entries.length} />
+        <Stat label="Companies" value={companies.length} />
+        <Stat label="Parties grouped" value={parties.filter((p) => p.companyId).length} />
         <Stat label="Unbilled value" value={`₹${inr(totalUnbilled)}`} tone="gold" />
       </div>
 
@@ -106,7 +117,7 @@ export default function PartiesPage() {
             <Input
               value={q}
               onChange={(e) => setQ(e.target.value)}
-              placeholder="Search parties…"
+              placeholder="Search companies…"
               className="pl-9"
             />
           </div>
@@ -114,22 +125,22 @@ export default function PartiesPage() {
 
         {filtered.length === 0 ? (
           <EmptyState
-            icon={<Building2 size={32} />}
-            title={parties.length ? "No matches" : "No parties yet"}
+            icon={<Landmark size={32} />}
+            title={companies.length ? "No matches" : "No companies yet"}
             message={
-              parties.length
+              companies.length
                 ? "Try a different search."
-                : "Create your first party to start recording entries against it."
+                : "Create a company, then assign parties to it from the Parties tab to bill them together."
             }
             action={
               <button
                 onClick={() => {
-                  setDraft(blankParty());
+                  setDraft(blankCompany());
                   setIsNew(true);
                 }}
                 className="btn-primary"
               >
-                <Plus size={16} /> New party
+                <Plus size={16} /> New company
               </button>
             }
           />
@@ -137,11 +148,10 @@ export default function PartiesPage() {
           <Table
             head={
               <>
-                <th className="th">Party</th>
                 <th className="th">Company</th>
-                <th className="th">Address</th>
                 <th className="th">GSTIN</th>
                 <th className="th">Contact</th>
+                <th className="th text-right">Parties</th>
                 <th className="th text-right">Trips</th>
                 <th className="th text-right">Billed value</th>
                 <th className="th text-right">Unbilled</th>
@@ -149,44 +159,35 @@ export default function PartiesPage() {
               </>
             }
           >
-            {filtered.map((p) => {
-              const s = stats.get(p.id) ?? { trips: 0, total: 0, unbilled: 0 };
+            {filtered.map((c) => {
+              const s = stats.get(c.id) ?? { members: 0, trips: 0, total: 0, unbilled: 0, invoices: 0 };
               return (
-                <tr key={p.id} className="group transition hover:bg-navy-50/60">
+                <tr key={c.id} className="group transition hover:bg-navy-50/60">
                   <td className="td">
                     <Link
-                      href={`/parties/${p.id}`}
+                      href={`/companies/${c.id}`}
                       className="font-bold text-navy-900 hover:underline"
                     >
-                      {p.name}
+                      {c.name}
                     </Link>
-                    {p.code && (
+                    {c.code && (
                       <span className="ml-2 rounded bg-navy-100 px-1.5 py-0.5 font-mono text-[10px] font-bold text-navy-600">
-                        {p.code}
+                        {c.code}
                       </span>
                     )}
                   </td>
-                  <td className="td">
-                    {p.companyId ? (
-                      <Link href={`/companies/${p.companyId}`} className="hover:underline">
-                        <Chip tone="navy">{companyName(p.companyId)}</Chip>
-                      </Link>
-                    ) : (
-                      <span className="text-navy-300">—</span>
-                    )}
-                  </td>
-                  <td className="td max-w-[240px] truncate text-navy-600">{p.address || "—"}</td>
-                  <td className="td font-mono text-xs">{p.gstin || "—"}</td>
+                  <td className="td font-mono text-xs">{c.gstin || "—"}</td>
                   <td className="td text-navy-600">
-                    {p.contactPerson || p.phone ? (
+                    {c.contactPerson || c.phone ? (
                       <div className="leading-tight">
-                        <div>{p.contactPerson || "—"}</div>
-                        {p.phone && <div className="text-xs text-navy-400">{p.phone}</div>}
+                        <div>{c.contactPerson || "—"}</div>
+                        {c.phone && <div className="text-xs text-navy-400">{c.phone}</div>}
                       </div>
                     ) : (
                       "—"
                     )}
                   </td>
+                  <td className="td tabular text-right">{s.members}</td>
                   <td className="td tabular text-right">{s.trips}</td>
                   <td className="td tabular text-right font-semibold">₹{inr(s.total)}</td>
                   <td className="td tabular text-right">
@@ -200,7 +201,7 @@ export default function PartiesPage() {
                     <div className="flex items-center justify-end gap-1 opacity-100 transition lg:opacity-0 lg:group-hover:opacity-100">
                       {s.unbilled > 0 && (
                         <Link
-                          href={`/invoices?party=${p.id}`}
+                          href={`/invoices?company=${c.id}`}
                           className="rounded-lg p-1.5 text-navy-500 hover:bg-navy-100"
                           title="Create invoice"
                         >
@@ -209,7 +210,7 @@ export default function PartiesPage() {
                       )}
                       <button
                         onClick={() => {
-                          setDraft(p);
+                          setDraft(c);
                           setIsNew(false);
                         }}
                         className="rounded-lg p-1.5 text-navy-500 hover:bg-navy-100"
@@ -218,7 +219,7 @@ export default function PartiesPage() {
                         <Pencil size={15} />
                       </button>
                       <button
-                        onClick={() => setConfirmDelete(p)}
+                        onClick={() => setConfirmDelete(c)}
                         className="rounded-lg p-1.5 text-navy-400 hover:bg-red-50 hover:text-red-600"
                         title="Delete"
                       >
@@ -236,15 +237,15 @@ export default function PartiesPage() {
       <Modal
         open={!!draft}
         onClose={() => setDraft(null)}
-        title={isNew ? "New party" : "Edit party"}
-        subtitle="These details print on the invoice header."
+        title={isNew ? "New company" : "Edit company"}
+        subtitle="These details print on the invoice header when you bill this company."
         footer={
           <>
             <button className="btn-ghost" onClick={() => setDraft(null)}>
               Cancel
             </button>
             <button className="btn-primary" onClick={save} disabled={!valid}>
-              Save party
+              Save company
             </button>
           </>
         }
@@ -252,19 +253,14 @@ export default function PartiesPage() {
         {draft && (
           <div className="grid gap-4">
             <div className="grid gap-4 sm:grid-cols-4">
-              <Field label="Party / company name" required className="sm:col-span-3">
+              <Field label="Company name" required className="sm:col-span-3">
                 <Input
                   value={draft.name}
                   onChange={(e) => setDraft({ ...draft, name: e.target.value })}
                   placeholder="MTC BUSINESS PVT LTD"
                 />
               </Field>
-              <Field
-                label="Code"
-                hint={`e.g. ${company.invoicePrefix ?? "CST"}/${
-                  draft.code?.trim().toUpperCase() || "MTC"
-                }/01/${fyLabel(today())}`}
-              >
+              <Field label="Code" hint={`e.g. CST/${draft.code?.trim().toUpperCase() || "MTC"}/01/${today().slice(2, 4)}-…`}>
                 <Input
                   value={draft.code ?? ""}
                   onChange={(e) => setDraft({ ...draft, code: e.target.value.toUpperCase() })}
@@ -274,30 +270,12 @@ export default function PartiesPage() {
                 />
               </Field>
             </div>
-            <Field
-              label="Company"
-              hint="Optional — group this party under a company to bill them together."
-            >
-              <Select
-                value={draft.companyId ?? ""}
-                onChange={(e) =>
-                  setDraft({ ...draft, companyId: e.target.value || undefined })
-                }
-              >
-                <option value="">No company — bill this party directly</option>
-                {companies.map((c) => (
-                  <option key={c.id} value={c.id}>
-                    {c.name}
-                  </option>
-                ))}
-              </Select>
-            </Field>
-            <Field label="Branch address">
+            <Field label="Address">
               <Textarea
                 rows={3}
                 value={draft.address ?? ""}
                 onChange={(e) => setDraft({ ...draft, address: e.target.value })}
-                placeholder={"Nanekarwadi, Chakan,\nTal. Khed, Dist. Pune – 410 501"}
+                placeholder={"Head office address, printed on the bill"}
               />
             </Field>
             <div className="grid gap-4 sm:grid-cols-2">
@@ -353,7 +331,7 @@ export default function PartiesPage() {
       <Modal
         open={!!confirmDelete}
         onClose={() => setConfirmDelete(null)}
-        title="Delete this party?"
+        title="Delete this company?"
         footer={
           <>
             <button className="btn-ghost" onClick={() => setConfirmDelete(null)}>
@@ -362,7 +340,7 @@ export default function PartiesPage() {
             <button
               className="btn-danger"
               onClick={async () => {
-                if (confirmDelete) await store.deleteParty(confirmDelete.id);
+                if (confirmDelete) await store.deleteCompanyEntity(confirmDelete.id);
                 setConfirmDelete(null);
               }}
             >
@@ -371,27 +349,26 @@ export default function PartiesPage() {
           </>
         }
       >
-        {partyEntryCount > 0 || partyInvoiceCount > 0 ? (
-          <p className="text-sm text-navy-600">
-            <strong>{confirmDelete?.name}</strong> will be removed permanently, along with{" "}
-            {partyEntryCount > 0 && (
-              <>
-                <strong>{partyEntryCount}</strong> {partyEntryCount === 1 ? "entry" : "entries"}
-              </>
-            )}
-            {partyEntryCount > 0 && partyInvoiceCount > 0 && " and "}
-            {partyInvoiceCount > 0 && (
-              <>
-                <strong>{partyInvoiceCount}</strong> {partyInvoiceCount === 1 ? "invoice" : "invoices"}
-              </>
-            )}{" "}
-            recorded against it. This cannot be undone.
-          </p>
-        ) : (
-          <p className="text-sm text-navy-600">
-            <strong>{confirmDelete?.name}</strong> will be removed permanently.
-          </p>
-        )}
+        <p className="text-sm text-navy-600">
+          <strong>{confirmDelete?.name}</strong> will be removed permanently.
+          {companyMemberCount > 0 && (
+            <>
+              {" "}
+              Its <strong>{companyMemberCount}</strong>{" "}
+              {companyMemberCount === 1 ? "party stays" : "parties stay"} — they're just ungrouped
+              from this company, not deleted.
+            </>
+          )}
+          {companyInvoiceCount > 0 && (
+            <>
+              {" "}
+              <strong>{companyInvoiceCount}</strong>{" "}
+              {companyInvoiceCount === 1 ? "invoice" : "invoices"} billed to this company{" "}
+              {companyInvoiceCount === 1 ? "is" : "are"} deleted — those entries go back to
+              unbilled.
+            </>
+          )}
+        </p>
       </Modal>
     </>
   );

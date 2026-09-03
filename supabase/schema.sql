@@ -4,6 +4,24 @@
 -- NOTE: column names are quoted camelCase so they match the app's TypeScript
 -- model exactly and no field mapping is needed.
 
+-- A billing company groups several parties (branches/divisions) so they can
+-- be invoiced together as one bill, even though entries still track the
+-- individual party. Distinct from the single `company` table below, which
+-- holds *your own* letterhead details.
+create table if not exists companies (
+  id              text primary key,
+  name            text not null,
+  code            text,
+  address         text,
+  gstin           text,
+  pan             text,
+  "contactPerson" text,
+  phone           text,
+  email           text,
+  notes           text,
+  "createdAt"     timestamptz not null default now()
+);
+
 create table if not exists parties (
   id              text primary key,
   name            text not null,
@@ -20,6 +38,11 @@ create table if not exists parties (
 
 -- Short code used to build invoice numbers: CST/MTC/01/26-27
 alter table parties add column if not exists code text;
+
+-- The company this party bills under, if any. Ungrouped (not deleted) if the
+-- company is ever removed.
+alter table parties add column if not exists "companyId" text references companies (id) on delete set null;
+create index if not exists parties_company_idx on parties ("companyId");
 
 create table if not exists vehicles (
   id                text primary key,
@@ -65,6 +88,7 @@ create table if not exists invoices (
   id               text primary key,
   "invoiceNo"      text not null,
   date             date not null,
+  -- Exactly one of partyId / companyId is set — see the Invoice type.
   "partyId"        text references parties (id) on delete restrict,
   "fromDate"       date not null,
   "toDate"         date not null,
@@ -77,6 +101,12 @@ create table if not exists invoices (
   notes            text,
   "createdAt"      timestamptz not null default now()
 );
+
+-- A bill made out to a company instead of one party — the app deletes an
+-- invoice's own row before ever removing the company it bills, but this is
+-- set null as a non-destructive default for anything done outside the app.
+alter table invoices add column if not exists "companyId" text references companies (id) on delete set null;
+create index if not exists invoices_company_idx on invoices ("companyId");
 
 create table if not exists entries (
   id                 text primary key,
@@ -175,17 +205,18 @@ create index if not exists invoices_party_idx    on invoices ("partyId");
 -- Safe to re-run: it drops the old permissive policies first.
 -- ---------------------------------------------------------------------------
 
-alter table parties  enable row level security;
-alter table drivers  enable row level security;
-alter table vehicles enable row level security;
-alter table entries  enable row level security;
-alter table invoices enable row level security;
-alter table company  enable row level security;
+alter table parties   enable row level security;
+alter table companies enable row level security;
+alter table drivers   enable row level security;
+alter table vehicles  enable row level security;
+alter table entries   enable row level security;
+alter table invoices  enable row level security;
+alter table company   enable row level security;
 
 do $$
 declare t text;
 begin
-  foreach t in array array['parties','drivers','vehicles','entries','invoices','company'] loop
+  foreach t in array array['parties','companies','drivers','vehicles','entries','invoices','company'] loop
     -- remove the earlier wide-open policy, if it is still there
     execute format('drop policy if exists %I on %I', t || '_anon_all', t);
     execute format('drop policy if exists %I on %I', t || '_auth_all', t);

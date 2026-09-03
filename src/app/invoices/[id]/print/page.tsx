@@ -7,7 +7,7 @@ import { ArrowLeft, Printer, FileWarning } from "lucide-react";
 import { useStore } from "@/lib/store";
 import { amountInWords, entryTotal, fmtDate, num } from "@/lib/calc";
 import { EmptyState, cx } from "@/components/ui";
-import { InvoiceSheet } from "@/components/InvoiceSheet";
+import { InvoiceSheet, type BillTo } from "@/components/InvoiceSheet";
 import { EntryReportSheet } from "@/components/EntryReportSheet";
 
 type Scope = "both" | "invoice" | "report";
@@ -20,11 +20,19 @@ const SCOPES: { key: Scope; label: string; title: string }[] = [
 
 export default function InvoicePrintPage() {
   const { id } = useParams<{ id: string }>();
-  const { invoices, parties, entries, company, ready } = useStore();
+  const { invoices, parties, companies, entries, company, partyName, ready } = useStore();
   const [scope, setScope] = useState<Scope>("both");
 
   const invoice = invoices.find((i) => i.id === id);
   const party = parties.find((p) => p.id === invoice?.partyId);
+  const billedCompany = companies.find((c) => c.id === invoice?.companyId);
+  const billTo: BillTo | undefined = invoice?.companyId
+    ? billedCompany
+      ? { name: billedCompany.name, address: billedCompany.address, gstin: billedCompany.gstin }
+      : { name: "—" }
+    : party
+      ? { name: party.name, address: party.address, gstin: party.gstin }
+      : undefined;
 
   const rows = useMemo(() => {
     if (!invoice) return [];
@@ -120,7 +128,7 @@ export default function InvoicePrintPage() {
           <div className="animate-rise">
             <InvoiceSheet
               company={company}
-              party={party}
+              billTo={billTo}
               invoice={invoice}
               gstAmount={gstAmount}
               amountWords={amountInWords(invoice.total)}
@@ -132,13 +140,16 @@ export default function InvoicePrintPage() {
           <div className={cx("animate-rise", showInvoice && "print-break mt-8")}>
             <EntryReportSheet
               invoiceNo={invoice.invoiceNo}
-              partyName={party?.name}
+              partyName={billTo?.name}
               fromDate={fmtDate(invoice.fromDate)}
               toDate={fmtDate(invoice.toDate)}
               rows={rows.map((e) => ({
                 id: e.id,
                 date: fmtDate(e.date),
-                name: e.consignee?.trim() || party?.name || "",
+                // Company bills pool entries from several parties, so each
+                // row falls back to its own party rather than the one name
+                // on the invoice header.
+                name: e.consignee?.trim() || partyName(e.partyId),
                 qty: e.qty,
                 amount: entryTotal(e),
                 vehicleNo: e.vehicleNo,

@@ -21,7 +21,7 @@ export default function SettingsPage() {
     setCompany((p) => ({ ...p, [k]: v }));
 
   async function save() {
-    await store.saveCompany(company);
+    await store.saveCompanyProfile(company);
     setSaved(true);
     setTimeout(() => setSaved(false), 2000);
   }
@@ -42,7 +42,14 @@ export default function SettingsPage() {
     setRestored(false);
     try {
       const parsed = JSON.parse(await file.text()) as Partial<DB>;
-      const required: (keyof DB)[] = ["parties", "drivers", "vehicles", "entries", "invoices"];
+      const required: (keyof DB)[] = [
+        "parties",
+        "companies",
+        "drivers",
+        "vehicles",
+        "entries",
+        "invoices",
+      ];
       const missing = required.filter((k) => parsed[k] !== undefined && !Array.isArray(parsed[k]));
       if (!Array.isArray(parsed.entries) || !Array.isArray(parsed.parties) || missing.length) {
         throw new Error("This file doesn't look like a backup.");
@@ -50,6 +57,7 @@ export default function SettingsPage() {
       const nextCompany = { ...store.company, ...(parsed.company ?? {}) };
       await store.importDB({
         parties: parsed.parties ?? [],
+        companies: parsed.companies ?? [],
         drivers: parsed.drivers ?? [],
         vehicles: parsed.vehicles ?? [],
         entries: (parsed.entries ?? []).map(normaliseEntry),
@@ -263,9 +271,9 @@ NEXT_PUBLIC_SUPABASE_ANON_KEY=…`}
       >
         <p className="text-sm text-navy-600">
           All {store.entries.length} entries, {store.invoices.length} invoices,{" "}
-          {store.parties.length} parties, {store.drivers.length} drivers and{" "}
-          {store.vehicles.length} vehicles will be deleted, and your company details reset to
-          blank. This is a full reset.
+          {store.parties.length} parties, {store.companies.length} companies,{" "}
+          {store.drivers.length} drivers and {store.vehicles.length} vehicles will be deleted, and
+          your company details reset to blank. This is a full reset.
         </p>
         <p className="mt-3 rounded-lg bg-gold-50 px-3 py-2 text-sm text-gold-900">
           Download a backup first — this cannot be undone.

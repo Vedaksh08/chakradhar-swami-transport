@@ -37,6 +37,34 @@ export interface Party {
   phone?: string;
   email?: string;
   notes?: string;
+  /**
+   * The company this party bills under, if any — e.g. branches "AB", "AC",
+   * "AD" all belonging to company "MTC". When set, entries against this
+   * party can be pulled into one invoice raised to the company instead of
+   * the party directly.
+   */
+  companyId?: string;
+  createdAt: string;
+}
+
+/**
+ * A billing company — a group of parties (branches/divisions) that get
+ * invoiced together as one bill, even though entries are still recorded
+ * against the individual party. Distinct from `CompanyProfile`, which is
+ * *your own* letterhead details.
+ */
+export interface Company {
+  id: string;
+  name: string;
+  /** Short code used to build invoice numbers, e.g. "MTC" -> CST/MTC/01/26-27 */
+  code?: string;
+  address?: string;
+  gstin?: string;
+  pan?: string;
+  contactPerson?: string;
+  phone?: string;
+  email?: string;
+  notes?: string;
   createdAt: string;
 }
 
@@ -149,7 +177,14 @@ export interface Invoice {
   id: string;
   invoiceNo: string; // CST/MTC/01/26-27 — auto-built, always editable
   date: string;
-  partyId: string;
+  /**
+   * Exactly one of `partyId` / `companyId` is set. A party-billed invoice
+   * pulls entries from that one party; a company-billed invoice pulls
+   * entries from every party under that company, but is still one bill
+   * made out to the company.
+   */
+  partyId?: string;
+  companyId?: string;
   fromDate: string;
   toDate: string;
   entryIds: string[];
@@ -179,6 +214,7 @@ export interface CompanyProfile {
 
 export interface DB {
   parties: Party[];
+  companies: Company[];
   drivers: Driver[];
   vehicles: Vehicle[];
   entries: Entry[];

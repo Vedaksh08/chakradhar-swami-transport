@@ -29,9 +29,10 @@ import { downloadCsv } from "@/lib/csv";
 
 export default function PartyDetailPage() {
   const { id } = useParams<{ id: string }>();
-  const { parties, entries, invoices, partyName, driverName, ready } = useStore();
+  const { parties, companies, entries, invoices, partyName, driverName, ready } = useStore();
 
   const party = parties.find((p) => p.id === id);
+  const parentCompany = companies.find((c) => c.id === party?.companyId);
 
   const [from, setFrom] = useState("");
   const [to, setTo] = useState("");
@@ -58,13 +59,14 @@ export default function PartyDetailPage() {
     [trips]
   );
 
-  const partyInvoices = useMemo(
-    () =>
-      invoices
-        .filter((i) => i.partyId === id)
-        .sort((a, b) => b.date.localeCompare(a.date)),
-    [invoices, id]
-  );
+  // Includes company invoices that happened to pull in this party's entries,
+  // not just ones billed to the party directly.
+  const partyInvoices = useMemo(() => {
+    const tripIds = new Set(allTrips.map((e) => e.id));
+    return invoices
+      .filter((i) => i.partyId === id || (i.companyId && i.entryIds.some((eid) => tripIds.has(eid))))
+      .sort((a, b) => b.date.localeCompare(a.date));
+  }, [invoices, id, allTrips]);
 
   const unbilled = useMemo(
     () => trips.filter((e) => !e.invoiceId).reduce((s, e) => s + entryTotal(e), 0),
@@ -170,6 +172,16 @@ export default function PartyDetailPage() {
       <div className="grid gap-5 lg:grid-cols-3">
         <Card title="Details" className="lg:col-span-1">
           <dl className="grid gap-2 text-sm">
+            {parentCompany && (
+              <div className="flex justify-between gap-3">
+                <dt className="text-navy-500">Company</dt>
+                <dd className="font-semibold text-navy-900">
+                  <Link href={`/companies/${parentCompany.id}`} className="hover:underline">
+                    {parentCompany.name}
+                  </Link>
+                </dd>
+              </div>
+            )}
             <Row label="Code" value={party.code} mono />
             <Row label="GSTIN" value={party.gstin} mono />
             <Row label="PAN" value={party.pan} mono />

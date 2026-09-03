@@ -1,7 +1,14 @@
 "use client";
 
-import type { CompanyProfile, Invoice, Party } from "@/lib/types";
+import type { CompanyProfile, Invoice } from "@/lib/types";
 import { fmtDate, inr, num } from "@/lib/calc";
+
+/** Whoever the invoice is made out to — a party, or a company billed on their behalf. */
+export interface BillTo {
+  name: string;
+  address?: string;
+  gstin?: string;
+}
 
 /**
  * A4 invoice, matching chakradhar_swami_transport_invoice_professional.html.
@@ -9,13 +16,13 @@ import { fmtDate, inr, num } from "@/lib/calc";
  */
 export function InvoiceSheet({
   company,
-  party,
+  billTo,
   invoice,
   gstAmount,
   amountWords,
 }: {
   company: CompanyProfile;
-  party?: Party;
+  billTo?: BillTo;
   invoice: Invoice;
   gstAmount: number;
   amountWords: string;
@@ -71,11 +78,11 @@ export function InvoiceSheet({
       <section className="invoice-meta">
         <div className="bill-to">
           <div className="section-label">Bill To</div>
-          <div className="customer-name">{party?.name ?? "—"}</div>
-          <div className="customer-address">{party?.address}</div>
-          {party?.gstin && (
+          <div className="customer-name">{billTo?.name ?? "—"}</div>
+          <div className="customer-address">{billTo?.address}</div>
+          {billTo?.gstin && (
             <div className="customer-gstin" style={{ marginTop: 5 }}>
-              <strong>GSTIN:</strong> {party.gstin}
+              <strong>GSTIN:</strong> {billTo.gstin}
             </div>
           )}
         </div>
