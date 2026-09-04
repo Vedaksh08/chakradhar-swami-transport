@@ -3,8 +3,17 @@
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
-import { FileText, Plus, Printer, Trash2, Pencil, Search } from "lucide-react";
-import type { Entry, Invoice } from "@/lib/types";
+import {
+  ArrowDownLeft,
+  ArrowUpRight,
+  FileText,
+  Plus,
+  Printer,
+  Trash2,
+  Pencil,
+  Search,
+} from "lucide-react";
+import type { Direction, Entry, Invoice } from "@/lib/types";
 import { useStore } from "@/lib/store";
 import {
   entryTotal,
@@ -176,6 +185,11 @@ export default function InvoicesPage() {
                       Other bill
                     </span>
                   )}
+                  {i.kind !== "other" && i.direction === "inward" && (
+                    <span className="ml-1.5 rounded bg-navy-100 px-1.5 py-0.5 text-[10px] font-bold uppercase text-navy-500">
+                      Inward
+                    </span>
+                  )}
                 </td>
                 <td className="td text-xs text-navy-500">
                   {fmtDate(i.fromDate)} → {fmtDate(i.toDate)}
@@ -285,7 +299,15 @@ function InvoiceBuilder({
   const [inv, setInv] = useState<Invoice>(initial);
   const [mode, setMode] = useState<BillMode>(initial.companyId ? "company" : "party");
   const [billKind, setBillKind] = useState<BillKind>(initial.kind === "other" ? "other" : "trip");
+  const [direction, setDirection] = useState<Direction>(initial.direction ?? "outward");
   const [excluded, setExcluded] = useState<Set<string>>(() => new Set());
+
+  /** Switching direction swaps the whole entry pool, so start the picks over. */
+  function switchDirection(next: Direction) {
+    if (next === direction) return;
+    setDirection(next);
+    setExcluded(new Set());
+  }
 
   const set = <K extends keyof Invoice>(k: K, v: Invoice[K]) => setInv((p) => ({ ...p, [k]: v }));
 
@@ -317,12 +339,26 @@ function InvoiceBuilder({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [billToId, inv.date, numberTouched, mode]);
 
+  // Inward and outward are billed apart, so only one side of the ledger is
+  // ever on the table at a time.
   const candidates: Entry[] = useMemo(() => {
     if (!billToId) return [];
-    return mode === "company"
-      ? entriesForCompany(billToId, inv.fromDate, inv.toDate, isNew ? undefined : inv.id)
-      : entriesFor(billToId, inv.fromDate, inv.toDate, isNew ? undefined : inv.id);
-  }, [mode, billToId, inv.fromDate, inv.toDate, inv.id, isNew, entriesFor, entriesForCompany]);
+    const pool =
+      mode === "company"
+        ? entriesForCompany(billToId, inv.fromDate, inv.toDate, isNew ? undefined : inv.id)
+        : entriesFor(billToId, inv.fromDate, inv.toDate, isNew ? undefined : inv.id);
+    return pool.filter((e) => (e.direction ?? "outward") === direction);
+  }, [
+    mode,
+    billToId,
+    inv.fromDate,
+    inv.toDate,
+    inv.id,
+    isNew,
+    direction,
+    entriesFor,
+    entriesForCompany,
+  ]);
 
   const selected = useMemo(
     () => candidates.filter((e) => !excluded.has(e.id)),
@@ -363,6 +399,7 @@ function InvoiceBuilder({
         partyId: mode === "party" ? inv.partyId : undefined,
         companyId: mode === "company" ? inv.companyId : undefined,
         kind: billKind,
+        direction,
         entryIds: linkedIds,
         freightAmount: freight,
         total,
@@ -504,31 +541,63 @@ function InvoiceBuilder({
           </div>
         )}
 
-        {/* Invoice type */}
-        <Field label="Invoice type">
-          <div className="inline-flex w-fit rounded-lg bg-navy-100 p-1">
-            <button
-              type="button"
-              onClick={() => setBillKind("trip")}
-              className={cx(
-                "rounded-md px-3.5 py-1.5 text-xs font-bold transition",
-                billKind === "trip" ? "bg-white text-navy-900 shadow-sm" : "text-navy-500"
-              )}
+        {/* Invoice type + direction */}
+        <div className="flex flex-wrap gap-5">
+          <Field label="Invoice type">
+            <div className="inline-flex w-fit rounded-lg bg-navy-100 p-1">
+              <button
+                type="button"
+                onClick={() => setBillKind("trip")}
+                className={cx(
+                  "rounded-md px-3.5 py-1.5 text-xs font-bold transition",
+                  billKind === "trip" ? "bg-white text-navy-900 shadow-sm" : "text-navy-500"
+                )}
+              >
+                Trip invoice
+              </button>
+              <button
+                type="button"
+                onClick={() => setBillKind("other")}
+                className={cx(
+                  "rounded-md px-3.5 py-1.5 text-xs font-bold transition",
+                  billKind === "other" ? "bg-white text-navy-900 shadow-sm" : "text-navy-500"
+                )}
+              >
+                Other bill
+              </button>
+            </div>
+          </Field>
+
+          {billKind === "trip" && (
+            <Field
+              label="Direction"
+              hint="Inward and outward never share a bill"
             >
-              Trip invoice
-            </button>
-            <button
-              type="button"
-              onClick={() => setBillKind("other")}
-              className={cx(
-                "rounded-md px-3.5 py-1.5 text-xs font-bold transition",
-                billKind === "other" ? "bg-white text-navy-900 shadow-sm" : "text-navy-500"
-              )}
-            >
-              Other bill
-            </button>
-          </div>
-        </Field>
+              <div className="inline-flex w-fit rounded-lg bg-navy-100 p-1">
+                <button
+                  type="button"
+                  onClick={() => switchDirection("outward")}
+                  className={cx(
+                    "inline-flex items-center gap-1.5 rounded-md px-3.5 py-1.5 text-xs font-bold transition",
+                    direction === "outward" ? "bg-white text-navy-900 shadow-sm" : "text-navy-500"
+                  )}
+                >
+                  <ArrowUpRight size={13} /> Outward
+                </button>
+                <button
+                  type="button"
+                  onClick={() => switchDirection("inward")}
+                  className={cx(
+                    "inline-flex items-center gap-1.5 rounded-md px-3.5 py-1.5 text-xs font-bold transition",
+                    direction === "inward" ? "bg-white text-navy-900 shadow-sm" : "text-navy-500"
+                  )}
+                >
+                  <ArrowDownLeft size={13} /> Inward
+                </button>
+              </div>
+            </Field>
+          )}
+        </div>
 
         {billKind === "other" ? (
           <div className="rounded-xl border border-navy-200 p-4">
@@ -555,10 +624,11 @@ function InvoiceBuilder({
             <header className="flex flex-wrap items-center justify-between gap-2 border-b border-navy-100 px-4 py-3">
               <div>
                 <h3 className="text-sm font-bold text-navy-900">
-                  Entries in range · {selected.length} of {candidates.length}
+                  {direction === "inward" ? "Inward" : "Outward"} entries in range ·{" "}
+                  {selected.length} of {candidates.length}
                 </h3>
                 <p className="text-xs text-navy-500">
-                  Only unbilled entries appear here.
+                  Only unbilled {direction} entries appear here.
                 </p>
               </div>
               {candidates.length > 0 && (
@@ -582,7 +652,7 @@ function InvoiceBuilder({
               </p>
             ) : candidates.length === 0 ? (
               <p className="px-4 py-8 text-center text-sm text-navy-400">
-                No unbilled entries for{" "}
+                No unbilled {direction} entries for{" "}
                 {mode === "company" ? companyName(billToId) : partyName(billToId)} between{" "}
                 {fmtDate(inv.fromDate)} and {fmtDate(inv.toDate)}.
               </p>

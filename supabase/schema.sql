@@ -112,6 +112,11 @@ create index if not exists invoices_company_idx on invoices ("companyId");
 -- hand-entered charge with no entries attached.
 alter table invoices add column if not exists kind text not null default 'trip';
 
+-- Inward and outward trips are billed apart — a trip invoice only ever pulls
+-- entries running in its own direction. Null on invoices raised before the split.
+alter table invoices add column if not exists direction text
+  check (direction in ('outward','inward'));
+
 create table if not exists entries (
   id                 text primary key,
   direction          text not null default 'outward'
@@ -200,44 +205,198 @@ create index if not exists entries_vehicle_idx   on entries ("vehicleNo");
 create index if not exists invoices_party_idx    on invoices ("partyId");
 
 -- ---------------------------------------------------------------------------
--- Row Level Security  — SIGNED-IN USERS ONLY
+-- Accounts, approvals and the audit trail
 --
--- Every table is readable and writable only by a logged-in Supabase user.
--- The anon key on its own can do nothing, so even though that key ships in the
--- browser bundle, it is useless without a valid login.
---
--- Safe to re-run: it drops the old permissive policies first.
+-- One row per person who can sign in. The password is NOT here — Supabase Auth
+-- holds it — and `id` is the auth user's own id, so the two always line up.
+-- Rows are only ever written by the server using the service-role key, which
+-- is why there is no insert/update policy below: the owner's screen is the
+-- only way in.
 -- ---------------------------------------------------------------------------
 
-alter table parties   enable row level security;
-alter table companies enable row level security;
-alter table drivers   enable row level security;
-alter table vehicles  enable row level security;
-alter table entries   enable row level security;
-alter table invoices  enable row level security;
-alter table company   enable row level security;
+create table if not exists app_users (
+  id          uuid primary key references auth.users (id) on delete cascade,
+  username    text not null unique,
+  name        text not null,
+  role        text not null default 'staff' check (role in ('owner','staff')),
+  permissions jsonb not null default '[]'::jsonb,
+  active      boolean not null default true,
+  "createdAt" timestamptz not null default now()
+);
+
+-- A staff edit or deletion parked until the owner accepts it.
+create table if not exists change_requests (
+  id          text primary key,
+  "userId"    uuid,
+  "userName"  text not null,
+  kind        text not null check (kind in ('update','delete')),
+  entity      text not null,
+  "recordId"  text not null,
+  payload     jsonb,
+  previous    jsonb,
+  summary     text not null,
+  status      text not null default 'pending'
+              check (status in ('pending','approved','rejected')),
+  note        text,
+  "createdAt" timestamptz not null default now(),
+  "decidedAt" timestamptz,
+  "decidedBy" text
+);
+
+create index if not exists change_requests_status_idx on change_requests (status);
+
+-- Everything staff do, for the owner to read back.
+create table if not exists activity_log (
+  id          text primary key,
+  "userId"    uuid,
+  "userName"  text not null,
+  action      text not null,
+  entity      text not null,
+  "recordId"  text,
+  summary     text not null,
+  at          timestamptz not null default now()
+);
+
+create index if not exists activity_log_at_idx on activity_log (at desc);
+
+-- ---------------------------------------------------------------------------
+-- Row Level Security  — SIGNED-IN USERS ONLY, AND ONLY WHAT THEY'RE ALLOWED
+--
+-- Nothing is reachable with the anon key alone, so even though that key ships
+-- in the browser bundle it is useless without a valid login.
+--
+-- On top of that, writes are checked against the signed-in account's
+-- permissions. This is the real boundary — hiding a tab in the app is only a
+-- convenience, but these policies hold even against someone poking the API by
+-- hand.
+--
+-- An account with NO app_users row counts as the owner. That keeps the
+-- original dashboard-made login working exactly as before.
+--
+-- Safe to re-run: old policies are dropped first.
+-- ---------------------------------------------------------------------------
+
+create or replace function app_is_owner() returns boolean
+language sql stable security definer set search_path = public as $$
+  select coalesce(
+    (select u.role = 'owner' and u.active from app_users u where u.id = auth.uid()),
+    true
+  );
+$$;
+
+create or replace function app_can(perm text) returns boolean
+language sql stable security definer set search_path = public as $$
+  select coalesce(
+    (select u.active and (u.role = 'owner' or u.permissions ? perm)
+       from app_users u where u.id = auth.uid()),
+    true
+  );
+$$;
+
+alter table parties         enable row level security;
+alter table companies       enable row level security;
+alter table drivers         enable row level security;
+alter table vehicles        enable row level security;
+alter table entries         enable row level security;
+alter table invoices        enable row level security;
+alter table company         enable row level security;
+alter table app_users       enable row level security;
+alter table change_requests enable row level security;
+alter table activity_log    enable row level security;
 
 do $$
-declare t text;
+declare
+  t    text;
+  perm text;
+  tables text[] := array[
+    'parties','companies','drivers','vehicles','entries','invoices','company'
+  ];
+  perms  text[] := array[
+    'parties','companies','drivers','vehicles','entries','invoices','settings'
+  ];
+  i int;
 begin
-  foreach t in array array['parties','companies','drivers','vehicles','entries','invoices','company'] loop
-    -- remove the earlier wide-open policy, if it is still there
+  for i in 1 .. array_length(tables, 1) loop
+    t := tables[i];
+    perm := perms[i];
+
     execute format('drop policy if exists %I on %I', t || '_anon_all', t);
     execute format('drop policy if exists %I on %I', t || '_auth_all', t);
+    execute format('drop policy if exists %I on %I', t || '_read', t);
+    execute format('drop policy if exists %I on %I', t || '_add', t);
+    execute format('drop policy if exists %I on %I', t || '_edit', t);
+    execute format('drop policy if exists %I on %I', t || '_erase', t);
+
+    -- Reading stays open to anyone signed in: an entry clerk still needs the
+    -- party, driver and vehicle lists to fill the form in front of them.
+    execute format(
+      'create policy %I on %I for select to authenticated using (true)',
+      t || '_read', t
+    );
 
     execute format(
-      'create policy %I on %I for all to authenticated using (true) with check (true)',
-      t || '_auth_all', t
+      'create policy %I on %I for insert to authenticated with check (app_can(%L))',
+      t || '_add', t, perm
     );
+
+    if t = 'entries' then
+      -- The heart of it: staff add trips, but changing or removing one
+      -- afterwards belongs to the owner. Whoever handles invoicing can also
+      -- touch entries, since raising a bill stamps them.
+      execute format(
+        'create policy %I on %I for update to authenticated using (app_is_owner() or app_can(''invoices'')) with check (app_is_owner() or app_can(''invoices''))',
+        t || '_edit', t
+      );
+      execute format(
+        'create policy %I on %I for delete to authenticated using (app_is_owner() or app_can(''invoices''))',
+        t || '_erase', t
+      );
+    else
+      execute format(
+        'create policy %I on %I for update to authenticated using (app_can(%L)) with check (app_can(%L))',
+        t || '_edit', t, perm, perm
+      );
+      execute format(
+        'create policy %I on %I for delete to authenticated using (app_can(%L))',
+        t || '_erase', t, perm
+      );
+    end if;
   end loop;
 end $$;
 
--- Users are created by hand in the Supabase dashboard:
+-- Accounts: everyone signed in can read (the app needs to know its own
+-- permissions), but only the service-role key writes — no policy grants it.
+drop policy if exists app_users_read on app_users;
+create policy app_users_read on app_users for select to authenticated using (true);
+
+-- Requests: anyone signed in can raise one and see the queue; only the owner
+-- decides.
+drop policy if exists change_requests_read on change_requests;
+drop policy if exists change_requests_add on change_requests;
+drop policy if exists change_requests_decide on change_requests;
+drop policy if exists change_requests_erase on change_requests;
+create policy change_requests_read on change_requests for select to authenticated using (true);
+create policy change_requests_add on change_requests for insert to authenticated with check (true);
+create policy change_requests_decide on change_requests for update to authenticated
+  using (app_is_owner()) with check (app_is_owner());
+create policy change_requests_erase on change_requests for delete to authenticated
+  using (app_is_owner());
+
+-- Audit trail: append-only. Nobody can rewrite or erase their own tracks,
+-- because no update or delete policy exists.
+drop policy if exists activity_log_read on activity_log;
+drop policy if exists activity_log_add on activity_log;
+create policy activity_log_read on activity_log for select to authenticated using (true);
+create policy activity_log_add on activity_log for insert to authenticated with check (true);
+
+-- The first account is still made by hand in the Supabase dashboard:
 --   Authentication -> Users -> Add user -> Create new user
 --   (tick "Auto Confirm User" so no confirmation email is needed)
 --
--- There is no public sign-up in the app, so the only accounts that exist are
--- the ones you create there. To revoke someone, delete their user.
+-- It has no app_users row, so it counts as the owner. Everyone after that is
+-- created from the app's Users screen, which needs SUPABASE_SERVICE_ROLE_KEY
+-- set on the server (Vercel -> Settings -> Environment Variables). To revoke
+-- someone, delete them there or untick Active.
 --
 -- Verify the lockdown from a terminal — this must return an empty result or a
 -- permission error, never your data:

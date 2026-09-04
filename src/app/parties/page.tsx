@@ -5,7 +5,7 @@ import Link from "next/link";
 import { Building2, Plus, Pencil, Trash2, Search, FileText } from "lucide-react";
 import type { Party } from "@/lib/types";
 import { useStore } from "@/lib/store";
-import { entryTotal, fyLabel, inr, today, uid } from "@/lib/calc";
+import { entryTotal, inr, uid } from "@/lib/calc";
 import {
   Card,
   Chip,
@@ -26,7 +26,7 @@ function blankParty(): Party {
 
 export default function PartiesPage() {
   const store = useStore();
-  const { parties, entries, company, companies, companyName } = store;
+  const { parties, entries, companies, companyName } = store;
 
   const [q, setQ] = useState("");
   const [draft, setDraft] = useState<Party | null>(null);
@@ -160,11 +160,6 @@ export default function PartiesPage() {
                     >
                       {p.name}
                     </Link>
-                    {p.code && (
-                      <span className="ml-2 rounded bg-navy-100 px-1.5 py-0.5 font-mono text-[10px] font-bold text-navy-600">
-                        {p.code}
-                      </span>
-                    )}
                   </td>
                   <td className="td">
                     {p.companyId ? (
@@ -251,29 +246,13 @@ export default function PartiesPage() {
       >
         {draft && (
           <div className="grid gap-4">
-            <div className="grid gap-4 sm:grid-cols-4">
-              <Field label="Party / company name" required className="sm:col-span-3">
-                <Input
-                  value={draft.name}
-                  onChange={(e) => setDraft({ ...draft, name: e.target.value })}
-                  placeholder="MTC BUSINESS PVT LTD"
-                />
-              </Field>
-              <Field
-                label="Code"
-                hint={`e.g. ${company.invoicePrefix ?? "CST"}/${
-                  draft.code?.trim().toUpperCase() || "MTC"
-                }/01/${fyLabel(today())}`}
-              >
-                <Input
-                  value={draft.code ?? ""}
-                  onChange={(e) => setDraft({ ...draft, code: e.target.value.toUpperCase() })}
-                  placeholder="MTC"
-                  className="uppercase"
-                  maxLength={12}
-                />
-              </Field>
-            </div>
+            <Field label="Party name" required>
+              <Input
+                value={draft.name}
+                onChange={(e) => setDraft({ ...draft, name: e.target.value })}
+                placeholder="MTC BUSINESS PVT LTD"
+              />
+            </Field>
             <Field
               label="Company"
               hint="Optional — group this party under a company to bill them together."

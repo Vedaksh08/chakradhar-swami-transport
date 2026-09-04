@@ -12,9 +12,11 @@ import {
   Images,
   ArrowDownLeft,
   ArrowUpRight,
+  Clock,
 } from "lucide-react";
 import type { Entry } from "@/lib/types";
 import { useStore } from "@/lib/store";
+import { useAccess } from "@/lib/access";
 import {
   entryDriverExpenses,
   entryNet,
@@ -42,7 +44,12 @@ import { downloadCsv } from "@/lib/csv";
 
 export default function EntriesPage() {
   const store = useStore();
+  const access = useAccess();
   const { entries, parties, drivers, partyName, driverName } = store;
+
+  // Staff record trips; they don't get the earnings picture, and they can't
+  // quietly rewrite an entry once it's in — that goes to the owner first.
+  const isOwner = access.isOwner;
 
   // Empty = unbounded. Default to showing everything, so no entry is ever
   // hidden just because it falls outside a date window the user didn't set.
@@ -55,9 +62,11 @@ export default function EntriesPage() {
   const [q, setQ] = useState("");
 
   const [draft, setDraft] = useState<Entry | null>(null);
+  const [original, setOriginal] = useState<Entry | null>(null);
   const [isNew, setIsNew] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState<Entry | null>(null);
   const [photos, setPhotos] = useState<Entry | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
 
   const filtered = useMemo(() => {
     const needle = q.trim().toLowerCase();
@@ -116,25 +125,48 @@ export default function EntriesPage() {
 
   function openNew() {
     setDraft(blankEntry(store.nextEntryInvoiceNo()));
+    setOriginal(null);
     setIsNew(true);
   }
 
   function openEdit(e: Entry) {
-    setDraft({
+    const normalised = {
       ...e,
       driverExpenses: e.driverExpenses ?? [],
       vehicleExpenses: e.vehicleExpenses ?? [],
       photos: e.photos ?? [],
-    });
+    };
+    setDraft(normalised);
+    setOriginal(normalised);
     setIsNew(false);
   }
 
   const valid = Boolean(draft?.partyId && draft?.date && draft?.invoiceNo && draft?.vehicleNo);
 
+  const describe = (e: Entry) =>
+    `Entry ${e.invoiceNo} · ${fmtDate(e.date)} · ${partyName(e.partyId)} · ${e.vehicleNo}`;
+
+  function flash(message: string) {
+    setNotice(message);
+    setTimeout(() => setNotice(null), 4000);
+  }
+
   async function save() {
     if (!draft || !valid) return;
-    await store.saveEntry(draft);
+
+    // A new entry goes straight in — it's the edit afterwards that needs a
+    // second pair of eyes.
+    // The store logs the save itself, so staff work lands in the audit trail
+    // wherever it happens.
+    if (isOwner || isNew) {
+      await store.saveEntry(draft);
+      setDraft(null);
+      return;
+    }
+
+    await access.requestEntryChange("update", draft, original ?? undefined, describe(draft));
     setDraft(null);
+    flash("Sent to the owner for approval. The entry stays as it was until then.");
   }
 
   function exportCsv() {
@@ -188,15 +220,24 @@ export default function EntriesPage() {
         subtitle="Every trip you send or receive. Detention adds straight onto the entry total."
         actions={
           <>
-            <button onClick={exportCsv} className="btn-ghost" disabled={!filtered.length}>
-              <Download size={16} /> Export
-            </button>
+            {isOwner && (
+              <button onClick={exportCsv} className="btn-ghost" disabled={!filtered.length}>
+                <Download size={16} /> Export
+              </button>
+            )}
             <button onClick={openNew} className="btn-primary" disabled={!parties.length}>
               <Plus size={16} /> New entry
             </button>
           </>
         }
       />
+
+      {notice && (
+        <div className="mb-5 flex items-start gap-2 rounded-xl border border-gold-300 bg-gold-50 px-4 py-3 text-sm font-semibold text-gold-900">
+          <Clock size={16} className="mt-0.5 shrink-0" />
+          {notice}
+        </div>
+      )}
 
       {!parties.length && (
         <div className="mb-5 rounded-xl border border-gold-300 bg-gold-50 px-4 py-3 text-sm text-gold-900">
@@ -207,17 +248,29 @@ export default function EntriesPage() {
         </div>
       )}
 
-      <div className="stagger mb-5 grid grid-cols-2 gap-3 sm:gap-4 lg:grid-cols-5">
+      {/* The money tiles are the owner's business, not the entry clerk's. */}
+      <div
+        className={cx(
+          "stagger mb-5 grid gap-3 sm:gap-4",
+          isOwner ? "grid-cols-2 lg:grid-cols-5" : "grid-cols-2"
+        )}
+      >
         <Stat label="Entries" value={filtered.length} sub={`${totals.billedCount} invoiced`} />
-        <Stat label="Billed" value={`₹${inr(totals.billed)}`} tone="gold" />
-        <Stat label="Vehicle expenses" value={`₹${inr(totals.vehicleExp)}`} tone="red" />
-        <Stat label="Driver expenses" value={`₹${inr(totals.driverExp)}`} tone="red" />
-        <Stat
-          label="Net"
-          value={`₹${inr(totals.net)}`}
-          tone={totals.net >= 0 ? "green" : "red"}
-          sub={`${totals.qty.toFixed(3)} total qty`}
-        />
+        {isOwner ? (
+          <>
+            <Stat label="Billed" value={`₹${inr(totals.billed)}`} tone="gold" />
+            <Stat label="Vehicle expenses" value={`₹${inr(totals.vehicleExp)}`} tone="red" />
+            <Stat label="Driver expenses" value={`₹${inr(totals.driverExp)}`} tone="red" />
+            <Stat
+              label="Net"
+              value={`₹${inr(totals.net)}`}
+              tone={totals.net >= 0 ? "green" : "red"}
+              sub={`${totals.qty.toFixed(3)} total qty`}
+            />
+          </>
+        ) : (
+          <Stat label="Total qty" value={totals.qty.toFixed(3)} />
+        )}
       </div>
 
       <Card bodyClassName="p-0">
@@ -234,7 +287,42 @@ export default function EntriesPage() {
           </div>
         )}
 
-        <div className="grid gap-3 border-b border-navy-100 p-4 sm:grid-cols-2 lg:grid-cols-7">
+        {/* Inward / outward is the split that matters most, so it gets its own
+            control rather than hiding among the dropdowns. */}
+        <div className="flex flex-wrap items-center gap-2 border-b border-navy-100 px-4 pt-4">
+          {[
+            { key: "", label: "All", icon: null },
+            { key: "outward", label: "Outward", icon: <ArrowUpRight size={13} /> },
+            { key: "inward", label: "Inward", icon: <ArrowDownLeft size={13} /> },
+          ].map((opt) => (
+            <button
+              key={opt.key}
+              onClick={() => setDirection(opt.key)}
+              aria-pressed={direction === opt.key}
+              className={cx(
+                "inline-flex items-center gap-1.5 rounded-lg border px-3 py-1.5 text-xs font-bold transition",
+                direction === opt.key
+                  ? "border-navy-800 bg-navy-800 text-white"
+                  : "border-navy-200 bg-white text-navy-600 hover:bg-navy-50"
+              )}
+            >
+              {opt.icon}
+              {opt.label}
+              <span
+                className={cx(
+                  "tabular rounded px-1 text-[10px]",
+                  direction === opt.key ? "bg-white/15" : "bg-navy-100 text-navy-500"
+                )}
+              >
+                {opt.key
+                  ? entries.filter((e) => (e.direction ?? "outward") === opt.key).length
+                  : entries.length}
+              </span>
+            </button>
+          ))}
+        </div>
+
+        <div className="grid gap-3 border-b border-navy-100 p-4 sm:grid-cols-2 lg:grid-cols-6">
           <Field label="From" hint={from ? undefined : "any date"}>
             <Input type="date" value={from} onChange={(e) => setFrom(e.target.value)} />
           </Field>
@@ -271,13 +359,6 @@ export default function EntriesPage() {
               ))}
             </Select>
           </Field>
-          <Field label="Direction">
-            <Select value={direction} onChange={(e) => setDirection(e.target.value)}>
-              <option value="">Both</option>
-              <option value="outward">Outward</option>
-              <option value="inward">Inward</option>
-            </Select>
-          </Field>
           <Field label="Search">
             <div className="relative">
               <Search size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-navy-400" />
@@ -309,6 +390,7 @@ export default function EntriesPage() {
             head={
               <>
                 <th className="th">Date</th>
+                <th className="th">Type</th>
                 <th className="th">Inv. No</th>
                 <th className="th">Party</th>
                 <th className="th">Vehicle</th>
@@ -317,7 +399,8 @@ export default function EntriesPage() {
                 <th className="th text-right">Billed</th>
                 <th className="th text-right">Veh. exp</th>
                 <th className="th text-right">Drv. exp</th>
-                <th className="th text-right">Net</th>
+                {/* What the trip actually made is the owner's to see. */}
+                {isOwner && <th className="th text-right">Net</th>}
                 <th className="th">Status</th>
                 <th className="th"></th>
               </>
@@ -329,15 +412,17 @@ export default function EntriesPage() {
               const dExp = entryDriverExpenses(e);
               return (
                 <tr key={e.id} className="group transition hover:bg-navy-50/60">
+                  <td className="td">{fmtDate(e.date)}</td>
                   <td className="td">
-                    <div className="flex items-center gap-2">
-                      {e.direction === "outward" ? (
-                        <ArrowUpRight size={14} className="text-emerald-600" />
-                      ) : (
-                        <ArrowDownLeft size={14} className="text-navy-500" />
-                      )}
-                      {fmtDate(e.date)}
-                    </div>
+                    {e.direction === "inward" ? (
+                      <span className="inline-flex items-center gap-1 rounded-full bg-navy-100 px-2 py-0.5 text-[11px] font-bold text-navy-700">
+                        <ArrowDownLeft size={12} /> Inward
+                      </span>
+                    ) : (
+                      <span className="inline-flex items-center gap-1 rounded-full bg-emerald-100 px-2 py-0.5 text-[11px] font-bold text-emerald-700">
+                        <ArrowUpRight size={12} /> Outward
+                      </span>
+                    )}
                   </td>
                   <td className="td font-semibold">{e.invoiceNo}</td>
                   <td className="td max-w-[180px] truncate">{partyName(e.partyId)}</td>
@@ -354,16 +439,24 @@ export default function EntriesPage() {
                   </td>
                   <td className="td tabular text-right text-red-600">{vExp ? inr(vExp) : "—"}</td>
                   <td className="td tabular text-right text-red-600">{dExp ? inr(dExp) : "—"}</td>
-                  <td
-                    className={cx(
-                      "td tabular text-right font-bold",
-                      net >= 0 ? "text-emerald-700" : "text-red-600"
-                    )}
-                  >
-                    {inr(net)}
-                  </td>
+                  {isOwner && (
+                    <td
+                      className={cx(
+                        "td tabular text-right font-bold",
+                        net >= 0 ? "text-emerald-700" : "text-red-600"
+                      )}
+                    >
+                      {inr(net)}
+                    </td>
+                  )}
                   <td className="td">
-                    {e.invoiceId ? <Chip tone="green">Billed</Chip> : <Chip tone="slate">Open</Chip>}
+                    {access.pendingEntryIds.has(e.id) ? (
+                      <Chip tone="gold">Awaiting approval</Chip>
+                    ) : e.invoiceId ? (
+                      <Chip tone="green">Billed</Chip>
+                    ) : (
+                      <Chip tone="slate">Open</Chip>
+                    )}
                   </td>
                   <td className="td">
                     <div className="flex items-center justify-end gap-1 opacity-100 transition lg:opacity-0 lg:group-hover:opacity-100">
@@ -398,23 +491,25 @@ export default function EntriesPage() {
                 </tr>
               );
             })}
-            <tr className="bg-navy-50 font-bold">
-              <td className="td" colSpan={6}>
-                {filtered.length} entries
-              </td>
-              <td className="td tabular text-right">₹{inr(totals.billed)}</td>
-              <td className="td tabular text-right text-red-600">₹{inr(totals.vehicleExp)}</td>
-              <td className="td tabular text-right text-red-600">₹{inr(totals.driverExp)}</td>
-              <td
-                className={cx(
-                  "td tabular text-right",
-                  totals.net >= 0 ? "text-emerald-700" : "text-red-600"
-                )}
-              >
-                ₹{inr(totals.net)}
-              </td>
-              <td className="td" colSpan={2}></td>
-            </tr>
+            {isOwner && (
+              <tr className="bg-navy-50 font-bold">
+                <td className="td" colSpan={7}>
+                  {filtered.length} entries
+                </td>
+                <td className="td tabular text-right">₹{inr(totals.billed)}</td>
+                <td className="td tabular text-right text-red-600">₹{inr(totals.vehicleExp)}</td>
+                <td className="td tabular text-right text-red-600">₹{inr(totals.driverExp)}</td>
+                <td
+                  className={cx(
+                    "td tabular text-right",
+                    totals.net >= 0 ? "text-emerald-700" : "text-red-600"
+                  )}
+                >
+                  ₹{inr(totals.net)}
+                </td>
+                <td className="td" colSpan={2}></td>
+              </tr>
+            )}
           </Table>
         )}
       </Card>
@@ -432,11 +527,17 @@ export default function EntriesPage() {
               Cancel
             </button>
             <button className="btn-primary" onClick={save} disabled={!valid}>
-              {isNew ? "Save entry" : "Save changes"}
+              {isNew ? "Save entry" : isOwner ? "Save changes" : "Send for approval"}
             </button>
           </>
         }
       >
+        {!isOwner && !isNew && (
+          <p className="mb-4 rounded-lg bg-gold-50 px-3 py-2 text-xs font-semibold text-gold-900">
+            Changes to an entry you&apos;ve already saved go to the owner for approval. The entry
+            stays as it is until they accept it.
+          </p>
+        )}
         {draft && <EntryForm value={draft} onChange={setDraft} />}
       </Modal>
 
@@ -455,7 +556,7 @@ export default function EntriesPage() {
       <Modal
         open={!!confirmDelete}
         onClose={() => setConfirmDelete(null)}
-        title="Delete this entry?"
+        title={isOwner ? "Delete this entry?" : "Ask to delete this entry?"}
         footer={
           <>
             <button className="btn-ghost" onClick={() => setConfirmDelete(null)}>
@@ -464,11 +565,22 @@ export default function EntriesPage() {
             <button
               className="btn-danger"
               onClick={async () => {
-                if (confirmDelete) await store.deleteEntry(confirmDelete.id);
+                if (!confirmDelete) return;
+                if (isOwner) {
+                  await store.deleteEntry(confirmDelete.id);
+                } else {
+                  await access.requestEntryChange(
+                    "delete",
+                    confirmDelete,
+                    confirmDelete,
+                    describe(confirmDelete)
+                  );
+                  flash("Delete request sent to the owner. The entry stays until they accept it.");
+                }
                 setConfirmDelete(null);
               }}
             >
-              Delete
+              {isOwner ? "Delete" : "Send request"}
             </button>
           </>
         }
@@ -476,10 +588,12 @@ export default function EntriesPage() {
         <p className="text-sm text-navy-600">
           Entry <strong>{confirmDelete?.invoiceNo}</strong> dated{" "}
           <strong>{fmtDate(confirmDelete?.date)}</strong> for{" "}
-          <strong>{partyName(confirmDelete?.partyId)}</strong> will be removed. This cannot be
-          undone.
+          <strong>{partyName(confirmDelete?.partyId)}</strong>
+          {isOwner
+            ? " will be removed. This cannot be undone."
+            : " will only be removed once the owner approves it."}
         </p>
-        {confirmDelete?.invoiceId && (
+        {confirmDelete?.invoiceId && isOwner && (
           <p className="mt-3 rounded-lg bg-gold-50 px-3 py-2 text-sm text-gold-900">
             This entry is on an invoice. That invoice will be re-totalled without it.
           </p>

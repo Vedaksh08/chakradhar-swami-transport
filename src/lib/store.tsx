@@ -3,6 +3,7 @@
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useState } from "react";
 import type { Company, CompanyProfile, DB, Driver, Entry, Invoice, Party, Vehicle } from "./types";
 import { DEFAULT_COMPANY, repo, type TableName } from "./repo";
+import { useAccess } from "./access";
 import { buildInvoiceNo, entryTotal, inRange, num, round2, uid } from "./calc";
 
 interface StoreValue {
@@ -114,6 +115,20 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
   const [db, setDb] = useState<DB>(EMPTY);
   const [ready, setReady] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const { isOwner, log } = useAccess();
+
+  /**
+   * Records what a staff account changed, so the owner can read it back on
+   * the Users screen. The owner's own work isn't logged — the trail exists to
+   * show what everybody else has been doing.
+   */
+  const audit = useCallback(
+    (action: "create" | "update" | "delete", entity: string, id: string, summary: string) => {
+      if (isOwner) return;
+      void log(action, entity, id, summary);
+    },
+    [isOwner, log]
+  );
 
   useEffect(() => {
     let alive = true;
@@ -162,8 +177,9 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       await commit({ ...db, parties: nextList }, () =>
         exists ? repo.update("parties", p) : repo.insert("parties", p)
       );
+      audit(exists ? "update" : "create", "parties", p.id, p.name);
     },
-    [db, commit, upsert]
+    [db, commit, upsert, audit]
   );
 
   /**
@@ -207,8 +223,9 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
           await repo.remove("parties", id);
         }
       );
+      audit("delete", "parties", id, db.parties.find((p) => p.id === id)?.name ?? id);
     },
-    [db, commit]
+    [db, commit, audit]
   );
 
   const saveCompanyEntity = useCallback(
@@ -217,8 +234,9 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       await commit({ ...db, companies: nextList }, () =>
         exists ? repo.update("companies", c) : repo.insert("companies", c)
       );
+      audit(exists ? "update" : "create", "companies", c.id, c.name);
     },
-    [db, commit, upsert]
+    [db, commit, upsert, audit]
   );
 
   /**
@@ -264,8 +282,9 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
           await repo.remove("companies", id);
         }
       );
+      audit("delete", "companies", id, db.companies.find((c) => c.id === id)?.name ?? id);
     },
-    [db, commit]
+    [db, commit, audit]
   );
 
   const saveDriver = useCallback(
@@ -274,8 +293,9 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       await commit({ ...db, drivers: nextList }, () =>
         exists ? repo.update("drivers", d) : repo.insert("drivers", d)
       );
+      audit(exists ? "update" : "create", "drivers", d.id, d.name);
     },
-    [db, commit, upsert]
+    [db, commit, upsert, audit]
   );
 
   const deleteDriver = useCallback(
@@ -283,8 +303,9 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       await commit({ ...db, drivers: db.drivers.filter((d) => d.id !== id) }, () =>
         repo.remove("drivers", id)
       );
+      audit("delete", "drivers", id, db.drivers.find((d) => d.id === id)?.name ?? id);
     },
-    [db, commit]
+    [db, commit, audit]
   );
 
   const saveVehicle = useCallback(
@@ -294,8 +315,9 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       await commit({ ...db, vehicles: nextList }, () =>
         exists ? repo.update("vehicles", row) : repo.insert("vehicles", row)
       );
+      audit(exists ? "update" : "create", "vehicles", row.id, row.number);
     },
-    [db, commit, upsert]
+    [db, commit, upsert, audit]
   );
 
   const deleteVehicle = useCallback(
@@ -303,8 +325,9 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       await commit({ ...db, vehicles: db.vehicles.filter((v) => v.id !== id) }, () =>
         repo.remove("vehicles", id)
       );
+      audit("delete", "vehicles", id, db.vehicles.find((v) => v.id === id)?.number ?? id);
     },
-    [db, commit]
+    [db, commit, audit]
   );
 
   const saveEntry = useCallback(
@@ -313,8 +336,14 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       await commit({ ...db, entries: nextList }, () =>
         exists ? repo.update("entries", e) : repo.insert("entries", e)
       );
+      audit(
+        exists ? "update" : "create",
+        "entries",
+        e.id,
+        `Entry ${e.invoiceNo} · ${e.date} · ${e.vehicleNo}`
+      );
     },
-    [db, commit, upsert]
+    [db, commit, upsert, audit]
   );
 
   /**
@@ -331,12 +360,14 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       const byId = new Map(nextEntries.map((e) => [e.id, e]));
       const { nextInvoices, touched } = recomputeInvoices(db.invoices, new Set([id]), byId);
 
+      const gone = db.entries.find((e) => e.id === id);
       await commit({ ...db, entries: nextEntries, invoices: nextInvoices }, async () => {
         await repo.remove("entries", id);
         for (const inv of touched) await repo.update("invoices", inv);
       });
+      audit("delete", "entries", id, gone ? `Entry ${gone.invoiceNo} · ${gone.date}` : id);
     },
-    [db, commit]
+    [db, commit, audit]
   );
 
   /** Saving an invoice also stamps invoiceId onto every entry it covers. */
@@ -366,8 +397,9 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
         else await repo.insert("invoices", inv);
         for (const e of changed) await repo.update("entries", e);
       });
+      audit(exists ? "update" : "create", "invoices", inv.id, `Invoice ${inv.invoiceNo}`);
     },
-    [db, commit, upsert]
+    [db, commit, upsert, audit]
   );
 
   /** Deleting an invoice releases its entries back into the unbilled pool. */
@@ -380,6 +412,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
         released.push(u);
         return u;
       });
+      const gone = db.invoices.find((i) => i.id === id);
       await commit(
         { ...db, invoices: db.invoices.filter((i) => i.id !== id), entries: nextEntries },
         async () => {
@@ -387,15 +420,17 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
           for (const e of released) await repo.update("entries", e);
         }
       );
+      audit("delete", "invoices", id, gone ? `Invoice ${gone.invoiceNo}` : id);
     },
-    [db, commit]
+    [db, commit, audit]
   );
 
   const saveCompanyProfile = useCallback(
     async (c: CompanyProfile) => {
       await commit({ ...db, company: c }, () => repo.saveCompany(c));
+      audit("update", "settings", "company", "Company details");
     },
-    [db, commit]
+    [db, commit, audit]
   );
 
   const importDB = useCallback(
@@ -460,17 +495,26 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     [db.entries, db.parties]
   );
 
-  /** Next number in the house format, e.g. CST/MTC/01/26-27. */
+  /**
+   * Next number in the house format, e.g. CST/MTC/01/26-27.
+   *
+   * Parties don't carry a code of their own — the code belongs to the
+   * company they sit under, so a party billed directly borrows it and the
+   * number stays recognisable. A party with no company just gets
+   * CST/01/26-27.
+   */
   const nextInvoiceNo = useCallback(
-    (partyId: string, dateISO: string) =>
-      buildInvoiceNo(
+    (partyId: string, dateISO: string) => {
+      const parent = partyById.get(partyId)?.companyId;
+      return buildInvoiceNo(
         db.company.invoicePrefix ?? "CST",
-        partyById.get(partyId)?.code,
+        parent ? companyById.get(parent)?.code : undefined,
         dateISO,
         db.invoices,
         partyId
-      ),
-    [db.invoices, db.company.invoicePrefix, partyById]
+      );
+    },
+    [db.invoices, db.company.invoicePrefix, partyById, companyById]
   );
 
   /** Same, but numbering off the company's code and its own invoice history. */

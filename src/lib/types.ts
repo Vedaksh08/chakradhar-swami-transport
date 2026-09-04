@@ -28,8 +28,6 @@ export interface AdvanceLine {
 export interface Party {
   id: string;
   name: string;
-  /** Short code used to build invoice numbers, e.g. "MTC" -> CST/MTC/01/26-27 */
-  code?: string;
   address?: string;
   gstin?: string;
   pan?: string;
@@ -194,6 +192,12 @@ export interface Invoice {
    * sequence as everything else billed to this party/company.
    */
   kind?: "trip" | "other";
+  /**
+   * Inward and outward trips are billed separately — one bill never mixes
+   * the two. A trip invoice only pulls entries running in this direction.
+   * Absent on invoices raised before the split existed.
+   */
+  direction?: Direction;
   entryIds: string[];
   freightAmount: number;
   sgstPercent?: number;
@@ -227,4 +231,87 @@ export interface DB {
   entries: Entry[];
   invoices: Invoice[];
   company: CompanyProfile;
+}
+
+/* --------------------------------------------------------------- user access */
+
+/**
+ * A module a staff account can be let into. The dashboard and the users
+ * screen aren't on this list on purpose — both are owner-only, since one is
+ * the income summary and the other hands out access.
+ */
+export type Permission =
+  | "entries"
+  | "invoices"
+  | "vehicles"
+  | "drivers"
+  | "companies"
+  | "parties"
+  | "reports"
+  | "settings";
+
+export const PERMISSIONS: { key: Permission; label: string; hint: string }[] = [
+  { key: "entries", label: "Entries", hint: "Record trips. Edits need your approval." },
+  { key: "invoices", label: "Invoices", hint: "Raise and print bills." },
+  { key: "vehicles", label: "Vehicles", hint: "Fleet records and standing costs." },
+  { key: "drivers", label: "Drivers", hint: "Driver records, pay and advances." },
+  { key: "companies", label: "Companies", hint: "Billing groups." },
+  { key: "parties", label: "Parties", hint: "The parties you bill." },
+  { key: "reports", label: "Reports", hint: "Earnings roll-ups. Shows money." },
+  { key: "settings", label: "Settings", hint: "Letterhead, backup, reset. Powerful." },
+];
+
+/**
+ * An account that can sign in. `owner` sees everything and approves changes;
+ * `staff` sees only the modules ticked in `permissions`.
+ *
+ * The password never lives here — Supabase Auth holds it. `id` is the Supabase
+ * auth user's id, so the two always line up.
+ */
+export interface AppUser {
+  id: string;
+  username: string;
+  name: string;
+  role: "owner" | "staff";
+  permissions: Permission[];
+  active: boolean;
+  createdAt: string;
+}
+
+/**
+ * A staff edit or delete waiting on the owner's say-so.
+ *
+ * Staff can add entries freely, but they can't quietly change one after the
+ * fact — the change is parked here with a before/after snapshot until the
+ * owner approves it.
+ */
+export interface ChangeRequest {
+  id: string;
+  userId?: string;
+  userName: string;
+  kind: "update" | "delete";
+  entity: "entries";
+  recordId: string;
+  /** The row as it would be after the change. Absent on a delete request. */
+  payload?: Entry;
+  /** The row as it stood when the request was raised, for the diff. */
+  previous?: Entry;
+  summary: string;
+  status: "pending" | "approved" | "rejected";
+  note?: string;
+  createdAt: string;
+  decidedAt?: string;
+  decidedBy?: string;
+}
+
+/** One line in the owner's audit trail of what staff have been doing. */
+export interface ActivityEvent {
+  id: string;
+  userId?: string;
+  userName: string;
+  action: "create" | "update" | "delete" | "request" | "approve" | "reject";
+  entity: string;
+  recordId?: string;
+  summary: string;
+  at: string;
 }

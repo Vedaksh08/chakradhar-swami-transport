@@ -102,9 +102,8 @@ export default function PartyDetailPage() {
       <PageHeader
         title={party.name}
         subtitle={
-          [party.code && `Code ${party.code}`, party.gstin && `GSTIN ${party.gstin}`, party.phone]
-            .filter(Boolean)
-            .join(" · ") || undefined
+          [party.gstin && `GSTIN ${party.gstin}`, party.phone].filter(Boolean).join(" · ") ||
+          undefined
         }
         actions={
           <Link href={`/invoices?party=${party.id}`} className="btn-primary">
@@ -182,7 +181,6 @@ export default function PartyDetailPage() {
                 </dd>
               </div>
             )}
-            <Row label="Code" value={party.code} mono />
             <Row label="GSTIN" value={party.gstin} mono />
             <Row label="PAN" value={party.pan} mono />
             <Row label="Contact" value={party.contactPerson} />

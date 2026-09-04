@@ -4,6 +4,7 @@ import { Suspense, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { Truck, Loader2, LogIn, AlertCircle } from "lucide-react";
 import { getSupabase, supabaseConfigured } from "@/lib/supabase";
+import { toLoginEmail } from "@/lib/users";
 import { Field, Input } from "@/components/ui";
 
 export default function LoginPage() {
@@ -34,8 +35,10 @@ function LoginForm() {
     }
 
     setBusy(true);
+    // Staff sign in with the ID the owner gave them; the owner's own account
+    // is an email. Both end up as an address Supabase recognises.
     const { error } = await supabase.auth.signInWithPassword({
-      email: email.trim(),
+      email: toLoginEmail(email),
       password,
     });
     setBusy(false);
@@ -78,13 +81,15 @@ function LoginForm() {
           </p>
 
           <div className="grid gap-4">
-            <Field label="ID">
+            <Field label="ID" hint="Your login ID, or the owner's email address">
               <Input
-                type="email"
+                type="text"
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
-                placeholder="you@example.com"
+                placeholder="ramesh"
                 autoComplete="username"
+                autoCapitalize="none"
+                spellCheck={false}
                 autoFocus
                 required
               />

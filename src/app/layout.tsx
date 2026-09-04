@@ -1,6 +1,7 @@
 import type { Metadata, Viewport } from "next";
 import "./globals.css";
 import { StoreProvider } from "@/lib/store";
+import { AccessProvider } from "@/lib/access";
 import { Shell } from "@/components/Shell";
 import { PWARegister } from "@/components/PWA";
 
@@ -30,9 +31,11 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
     <html lang="en">
       <body>
         <PWARegister />
-        <StoreProvider>
-          <Shell>{children}</Shell>
-        </StoreProvider>
+        <AccessProvider>
+          <StoreProvider>
+            <Shell>{children}</Shell>
+          </StoreProvider>
+        </AccessProvider>
       </body>
     </html>
   );
