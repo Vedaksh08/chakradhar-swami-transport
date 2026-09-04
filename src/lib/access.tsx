@@ -1,6 +1,14 @@
 "use client";
 
-import React, { createContext, useCallback, useContext, useEffect, useMemo, useState } from "react";
+import React, {
+  createContext,
+  useCallback,
+  useContext,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import type { ActivityEvent, AppUser, ChangeRequest, Entry, Permission } from "./types";
 import { getSupabase, supabaseConfigured } from "./supabase";
 import { uid } from "./calc";
@@ -26,6 +34,8 @@ interface AccessValue {
   ready: boolean;
   /** The signed-in account's own record. Null for the original owner and in local mode. */
   me: AppUser | null;
+  /** The Supabase auth id, which changes the moment somebody else signs in. */
+  userId: string | null;
   email: string | null;
   /** Display name for whoever is signed in. */
   who: string;
@@ -76,6 +86,7 @@ const Ctx = createContext<AccessValue | null>(null);
 export function AccessProvider({ children }: { children: React.ReactNode }) {
   const [ready, setReady] = useState(!supabaseConfigured);
   const [me, setMe] = useState<AppUser | null>(null);
+  const [userId, setUserId] = useState<string | null>(null);
   const [email, setEmail] = useState<string | null>(null);
   const [users, setUsers] = useState<AppUser[]>([]);
   const [requests, setRequests] = useState<ChangeRequest[]>([]);
@@ -88,43 +99,102 @@ export function AccessProvider({ children }: { children: React.ReactNode }) {
       return;
     }
 
-    const {
-      data: { user },
-    } = await sb.auth.getUser();
-    setEmail(user?.email ?? null);
+    // The whole interface waits on `ready`, so it has to be set no matter how
+    // this goes — a dropped connection here must not leave a blank screen.
+    try {
+      const {
+        data: { user },
+      } = await sb.auth.getUser();
+      setEmail(user?.email ?? null);
+      setUserId(user?.id ?? null);
 
-    if (!user) {
-      setMe(null);
+      if (!user) {
+        setMe(null);
+        setUsers([]);
+        setRequests([]);
+        setActivity([]);
+        return;
+      }
+
+      const [mine, all, reqs, acts] = await Promise.all([
+        sb.from("app_users").select("*").eq("id", user.id).maybeSingle(),
+        sb.from("app_users").select("*"),
+        sb.from("change_requests").select("*").order("createdAt", { ascending: false }).limit(300),
+        sb.from("activity_log").select("*").order("at", { ascending: false }).limit(300),
+      ]);
+
+      // A missing table (schema not run yet) shouldn't take the whole app down.
+      setMe((mine.data as AppUser | null) ?? null);
+      setUsers((all.data as AppUser[] | null) ?? []);
+      setRequests((reqs.data as ChangeRequest[] | null) ?? []);
+      setActivity((acts.data as ActivityEvent[] | null) ?? []);
+    } catch {
+      // Falls through to `ready` with nobody signed in, which shows the
+      // login gate rather than a spinner that never stops.
+    } finally {
       setReady(true);
-      return;
     }
-
-    const [mine, all, reqs, acts] = await Promise.all([
-      sb.from("app_users").select("*").eq("id", user.id).maybeSingle(),
-      sb.from("app_users").select("*"),
-      sb.from("change_requests").select("*").order("createdAt", { ascending: false }).limit(300),
-      sb.from("activity_log").select("*").order("at", { ascending: false }).limit(300),
-    ]);
-
-    // A missing table (schema not run yet) shouldn't take the whole app down.
-    setMe((mine.data as AppUser | null) ?? null);
-    setUsers((all.data as AppUser[] | null) ?? []);
-    setRequests((reqs.data as ChangeRequest[] | null) ?? []);
-    setActivity((acts.data as ActivityEvent[] | null) ?? []);
-    setReady(true);
   }, []);
 
   useEffect(() => {
     load();
   }, [load]);
 
+  /**
+   * Signing in doesn't remount this provider — the app just navigates — so
+   * without this the session that arrives at login is never noticed, and
+   * whoever signed in keeps the permissions of whoever came before (none,
+   * which reads as the owner). That was the "everything looks fine until you
+   * refresh" bug.
+   */
+  const loadedFor = useRef<string | null | undefined>(undefined);
+  useEffect(() => {
+    const sb = getSupabase();
+    if (!sb) return;
+    const {
+      data: { subscription },
+    } = sb.auth.onAuthStateChange((_event, session) => {
+      const next = session?.user?.id ?? null;
+      // Token refreshes fire this too; only a different person matters.
+      if (loadedFor.current === next) return;
+      loadedFor.current = next;
+      load();
+    });
+    return () => subscription.unsubscribe();
+  }, [load]);
+
+  /** Approvals and accounts arrive as they happen, not on the next refresh. */
+  useEffect(() => {
+    const sb = getSupabase();
+    if (!sb || !userId) return;
+
+    let timer: ReturnType<typeof setTimeout>;
+    const bump = () => {
+      clearTimeout(timer);
+      timer = setTimeout(load, 300);
+    };
+
+    let channel = sb.channel("access-live");
+    for (const table of ["app_users", "change_requests", "activity_log"]) {
+      channel = channel.on("postgres_changes", { event: "*", schema: "public", table }, bump);
+    }
+    channel.subscribe();
+
+    return () => {
+      clearTimeout(timer);
+      sb.removeChannel(channel);
+    };
+  }, [userId, load]);
+
   // Deactivating an account can't sign it out on its own, so the app treats a
   // locked user as having nothing — and the row policies refuse its writes.
   const locked = Boolean(me && !me.active);
 
   // No record means the original owner account, made in the Supabase
-  // dashboard before this screen existed — it keeps full rights.
-  const isOwner = !locked && (!supabaseConfigured || !me || me.role === "owner");
+  // dashboard before this screen existed — it keeps full rights. Note the
+  // `ready` guard: until the record is actually back, nobody is an owner,
+  // so a staff account can never flash the full interface on the way in.
+  const isOwner = ready && !locked && (!supabaseConfigured || !me || me.role === "owner");
 
   const can = useCallback(
     (perm: Permission) => (locked ? false : isOwner || (me?.permissions ?? []).includes(perm)),
@@ -253,6 +323,7 @@ export function AccessProvider({ children }: { children: React.ReactNode }) {
   const value: AccessValue = {
     ready,
     me,
+    userId,
     email,
     who,
     isOwner,

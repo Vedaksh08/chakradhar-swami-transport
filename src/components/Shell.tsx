@@ -100,6 +100,11 @@ export function Shell({ children }: { children: React.ReactNode }) {
   // Print views and the login screen render standalone, with no app chrome.
   if (standalone) return <>{children}</>;
 
+  // Nothing at all until we know who this is. Drawing the sidebar first and
+  // correcting it a moment later is what briefly showed a staff account every
+  // tab in the app.
+  if (!access.ready) return <Booting />;
+
   if (access.locked) return <LockedOut onSignOut={signOut} />;
 
   const isActive = (href: string) =>
@@ -299,6 +304,20 @@ export function Shell({ children }: { children: React.ReactNode }) {
         {/* iPhone home-indicator inset */}
         <div style={{ height: "env(safe-area-inset-bottom)" }} />
       </nav>
+    </div>
+  );
+}
+
+/** Held while we work out who is signed in and what they may see. */
+function Booting() {
+  return (
+    <div className="flex min-h-screen items-center justify-center bg-navy-50">
+      <div className="flex flex-col items-center gap-3">
+        <div className="grid h-12 w-12 animate-pulse place-items-center rounded-full border-2 border-gold-500 bg-white">
+          <Truck size={22} className="text-navy-800" />
+        </div>
+        <p className="text-xs font-semibold uppercase tracking-widest text-navy-400">Loading</p>
+      </div>
     </div>
   );
 }

@@ -389,6 +389,36 @@ drop policy if exists activity_log_add on activity_log;
 create policy activity_log_read on activity_log for select to authenticated using (true);
 create policy activity_log_add on activity_log for insert to authenticated with check (true);
 
+-- ---------------------------------------------------------------------------
+-- Live updates
+--
+-- Puts each table on Supabase's realtime publication so a change made by one
+-- person appears on everyone else's screen straight away, instead of only
+-- after they reload. Row Level Security still applies to what gets delivered.
+--
+-- Safe to re-run: a table already on the publication is skipped.
+-- ---------------------------------------------------------------------------
+
+do $$
+declare t text;
+begin
+  if not exists (select 1 from pg_publication where pubname = 'supabase_realtime') then
+    create publication supabase_realtime;
+  end if;
+
+  foreach t in array array[
+    'parties','companies','drivers','vehicles','entries','invoices','company',
+    'app_users','change_requests','activity_log'
+  ] loop
+    if not exists (
+      select 1 from pg_publication_tables
+      where pubname = 'supabase_realtime' and schemaname = 'public' and tablename = t
+    ) then
+      execute format('alter publication supabase_realtime add table public.%I', t);
+    end if;
+  end loop;
+end $$;
+
 -- The first account is still made by hand in the Supabase dashboard:
 --   Authentication -> Users -> Add user -> Create new user
 --   (tick "Auto Confirm User" so no confirmation email is needed)

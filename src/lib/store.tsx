@@ -12,6 +12,7 @@ import {
   type TableName,
 } from "./repo";
 import { useAccess } from "./access";
+import { getSupabase } from "./supabase";
 import { buildInvoiceNo, entryTotal, inRange, num, round2, uid } from "./calc";
 
 interface StoreValue {
@@ -140,7 +141,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
   const [db, setDb] = useState<DB>(EMPTY);
   const [ready, setReady] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const { isOwner, log } = useAccess();
+  const { isOwner, log, userId, ready: accessReady } = useAccess();
 
   /**
    * Records what a staff account changed, so the owner can read it back on
@@ -155,7 +156,16 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     [isOwner, log]
   );
 
+  /**
+   * Loads once we know who is asking, and again whenever that changes.
+   *
+   * Signing in doesn't remount this provider, so a load fired on mount runs
+   * while the browser is still anonymous — and the row policies quite
+   * correctly hand back nothing. That is why a fresh sign-in used to show an
+   * empty ledger until the page was refreshed by hand.
+   */
   useEffect(() => {
+    if (!accessReady) return;
     let alive = true;
     repo
       .load()
@@ -171,7 +181,52 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     return () => {
       alive = false;
     };
-  }, []);
+  }, [accessReady, userId]);
+
+  /**
+   * Live updates. Somebody else's entry, invoice or party shows up here as
+   * they save it, rather than waiting for a refresh. A whole reload rather
+   * than patching single rows, because an invoice's total depends on the
+   * entries under it — piecing that together from deltas is where the
+   * numbers would start to drift.
+   */
+  useEffect(() => {
+    const sb = getSupabase();
+    if (!sb || !userId) return;
+
+    let timer: ReturnType<typeof setTimeout>;
+    const bump = () => {
+      clearTimeout(timer);
+      timer = setTimeout(() => {
+        repo
+          .load()
+          .then(setDb)
+          .catch(() => {
+            // A dropped refresh isn't worth an error banner; the next change
+            // or a reload picks it up.
+          });
+      }, 400);
+    };
+
+    let channel = sb.channel("ledger-live");
+    for (const table of [
+      "entries",
+      "invoices",
+      "parties",
+      "companies",
+      "drivers",
+      "vehicles",
+      "company",
+    ]) {
+      channel = channel.on("postgres_changes", { event: "*", schema: "public", table }, bump);
+    }
+    channel.subscribe();
+
+    return () => {
+      clearTimeout(timer);
+      sb.removeChannel(channel);
+    };
+  }, [userId]);
 
   /** Apply to local state first (instant UI), then persist. */
   const commit = useCallback(
