@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { requireOwner, SETUP_HINT } from "@/lib/api-auth";
-import { adminConfigured } from "@/lib/supabase-server";
+import { adminClient, adminConfigured, callerClient } from "@/lib/supabase-server";
 import { isPermission, staffEmail, validatePassword, validateUsername } from "@/lib/users";
 
 export const dynamic = "force-dynamic";
@@ -9,9 +9,44 @@ function cleanPermissions(input: unknown): string[] {
   return Array.isArray(input) ? input.filter(isPermission) : [];
 }
 
-/** Whether this deployment can create accounts at all, so the UI can say so up front. */
+/**
+ * What's actually wired up, so the Users screen can name the missing piece
+ * instead of just failing when someone presses the button.
+ */
 export async function GET() {
-  return NextResponse.json({ adminConfigured, hint: adminConfigured ? null : SETUP_HINT });
+  const caller = callerClient();
+  const {
+    data: { user },
+  } = (await caller?.auth.getUser()) ?? { data: { user: null } };
+
+  let tablesReady: boolean | null = null;
+  let isOwner: boolean | null = null;
+
+  const admin = adminClient();
+  if (admin) {
+    const { error } = await admin.from("app_users").select("id").limit(1);
+    tablesReady = !error;
+    if (user && !error) {
+      const { data: row } = await admin
+        .from("app_users")
+        .select("role")
+        .eq("id", user.id)
+        .maybeSingle();
+      isOwner = !row || row.role === "owner";
+    }
+  }
+
+  return NextResponse.json({
+    adminConfigured,
+    hint: adminConfigured ? null : SETUP_HINT,
+    signedIn: Boolean(user),
+    tablesReady,
+    isOwner,
+    schemaHint:
+      tablesReady === false
+        ? "The accounts tables are missing. Run supabase/schema.sql in the Supabase SQL editor, then reload."
+        : null,
+  });
 }
 
 export async function POST(req: Request) {
@@ -48,9 +83,16 @@ export async function POST(req: Request) {
     user_metadata: { name, username },
   });
   if (authError || !created?.user) {
+    // The sign-in account is keyed on the ID, so a half-finished earlier
+    // attempt shows up here rather than as "taken" above.
+    const clash = /already been registered|already exists/i.test(authError?.message ?? "");
     return NextResponse.json(
-      { error: authError?.message ?? "Could not create the sign-in account." },
-      { status: 400 }
+      {
+        error: clash
+          ? `The login ID "${username}" is already in use by a sign-in account. Pick a different one.`
+          : (authError?.message ?? "Could not create the sign-in account."),
+      },
+      { status: clash ? 409 : 400 }
     );
   }
 

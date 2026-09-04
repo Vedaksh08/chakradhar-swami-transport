@@ -2,7 +2,15 @@
 
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useState } from "react";
 import type { Company, CompanyProfile, DB, Driver, Entry, Invoice, Party, Vehicle } from "./types";
-import { DEFAULT_COMPANY, repo, type TableName } from "./repo";
+import {
+  DEFAULT_COMPANY,
+  clearLocalDB,
+  countRows,
+  readLocalDB,
+  repo,
+  type MergeCounts,
+  type TableName,
+} from "./repo";
 import { useAccess } from "./access";
 import { buildInvoiceNo, entryTotal, inRange, num, round2, uid } from "./calc";
 
@@ -58,6 +66,17 @@ interface StoreValue {
 
   importDB: (db: DB) => Promise<void>;
   resetAll: () => Promise<void>;
+
+  /**
+   * Data stranded in this browser from before the cloud database was wired
+   * up. Null once there's nothing left to move.
+   */
+  strandedLocal: DB | null;
+  strandedCount: number;
+  /** Lifts that stranded data into the shared database. Adds only. */
+  adoptLocalData: () => Promise<MergeCounts>;
+  /** Throws the browser copy away without uploading it. */
+  discardLocalData: () => void;
 }
 
 const Ctx = createContext<StoreValue | null>(null);
@@ -444,7 +463,34 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
   const resetAll = useCallback(async () => {
     const next: DB = { ...EMPTY, company: { ...DEFAULT_COMPANY } };
     await commit(next, () => repo.replaceAll(next));
+    // Otherwise the browser copy would be offered straight back afterwards.
+    clearLocalDB();
+    setStranded(null);
   }, [commit]);
+
+  /**
+   * Anything the browser-storage era left behind. Only meaningful once a
+   * cloud database is connected — before that it *is* the live data.
+   */
+  const [stranded, setStranded] = useState<DB | null>(null);
+  useEffect(() => {
+    if (repo.kind !== "supabase") return;
+    setStranded(readLocalDB());
+  }, []);
+
+  const adoptLocalData = useCallback(async () => {
+    if (!stranded) return {};
+    const counts = await repo.merge(stranded, db);
+    clearLocalDB();
+    setStranded(null);
+    setDb(await repo.load());
+    return counts;
+  }, [stranded, db]);
+
+  const discardLocalData = useCallback(() => {
+    clearLocalDB();
+    setStranded(null);
+  }, []);
 
   const partyById = useMemo(() => new Map(db.parties.map((p) => [p.id, p])), [db.parties]);
   const companyById = useMemo(() => new Map(db.companies.map((c) => [c.id, c])), [db.companies]);
@@ -576,6 +622,10 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     nextEntryInvoiceNo,
     importDB,
     resetAll,
+    strandedLocal: stranded,
+    strandedCount: stranded ? countRows(stranded) : 0,
+    adoptLocalData,
+    discardLocalData,
   };
 
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;

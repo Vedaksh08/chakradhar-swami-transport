@@ -66,13 +66,13 @@ export default function UsersPage() {
   const [busy, setBusy] = useState(false);
   const [setupHint, setSetupHint] = useState<string | null>(null);
 
-  // Creating accounts needs a server key. Say so up front rather than after
-  // the owner has filled in a form.
+  // Name whatever is missing up front, rather than after the owner has
+  // filled in a form and pressed the button.
   useEffect(() => {
     if (access.localMode) return;
     fetch("/api/users")
       .then((r) => r.json())
-      .then((j) => setSetupHint(j?.adminConfigured ? null : (j?.hint ?? null)))
+      .then((j) => setSetupHint(j?.schemaHint ?? (j?.adminConfigured ? null : (j?.hint ?? null))))
       .catch(() => {});
   }, [access.localMode]);
 

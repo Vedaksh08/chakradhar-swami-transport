@@ -69,6 +69,139 @@ export interface Repo {
   remove(table: TableName, id: string): Promise<void>;
   saveCompany(c: CompanyProfile): Promise<void>;
   replaceAll(db: DB): Promise<void>;
+  /** Adds rows that aren't there yet. Never overwrites, never deletes. */
+  merge(incoming: DB, existing: DB): Promise<MergeCounts>;
+}
+
+export type MergeCounts = Partial<Record<TableName, number>>;
+
+/* ------------------------------------------------- browser-storage leftovers */
+
+/**
+ * Data left in this browser from before the cloud database was connected.
+ *
+ * With no Supabase keys the app quietly keeps everything in localStorage,
+ * which means every person and every device ends up with a private copy.
+ * Once the keys arrive that data is still sitting there, invisible — so the
+ * app offers to lift it into the shared database rather than stranding it.
+ */
+export function readLocalDB(): DB | null {
+  if (typeof window === "undefined") return null;
+  try {
+    const raw = window.localStorage.getItem(STORAGE_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as Partial<DB>;
+    const db: DB = {
+      parties: parsed.parties ?? [],
+      companies: parsed.companies ?? [],
+      drivers: parsed.drivers ?? [],
+      vehicles: parsed.vehicles ?? [],
+      entries: (parsed.entries ?? []).map(normaliseEntry),
+      invoices: parsed.invoices ?? [],
+      company: { ...DEFAULT_COMPANY, ...(parsed.company ?? {}) },
+    };
+    return countRows(db) > 0 ? db : null;
+  } catch {
+    return null;
+  }
+}
+
+export function countRows(db: DB): number {
+  return (
+    db.parties.length +
+    db.companies.length +
+    db.drivers.length +
+    db.vehicles.length +
+    db.entries.length +
+    db.invoices.length
+  );
+}
+
+/** Drops the browser copy once it's safely in the shared database. */
+export function clearLocalDB() {
+  if (typeof window === "undefined") return;
+  window.localStorage.removeItem(STORAGE_KEY);
+}
+
+/**
+ * Parents before children, so a row never lands before the row it points at.
+ * Same order `replaceAll` seeds in.
+ */
+const MERGE_ORDER: TableName[] = [
+  "companies",
+  "parties",
+  "drivers",
+  "vehicles",
+  "invoices",
+  "entries",
+];
+
+/**
+ * The columns each table actually has.
+ *
+ * Rows coming out of browser storage can carry leftovers the database never
+ * had — an entry saved years ago still has its old `expenses` key, and
+ * Postgres rejects the whole insert over one unknown column. Anything not on
+ * this list is dropped on the way up.
+ */
+const COLUMNS: Record<TableName, string[]> = {
+  companies: [
+    "id", "name", "code", "address", "gstin", "pan",
+    "contactPerson", "phone", "email", "notes", "createdAt",
+  ],
+  parties: [
+    "id", "name", "code", "address", "gstin", "pan",
+    "contactPerson", "phone", "email", "notes", "companyId", "createdAt",
+  ],
+  drivers: [
+    "id", "name", "address", "phone", "licenceNo", "panNo", "aadhaarNo",
+    "policeVerification", "active", "notes", "monthlyPay", "advances", "docs", "createdAt",
+  ],
+  vehicles: [
+    "id", "number", "make", "type", "ownerName", "capacityMt", "active", "notes",
+    "insuranceExpiry", "fitnessExpiry", "permitExpiry", "pucExpiry", "expenses", "createdAt",
+  ],
+  invoices: [
+    "id", "invoiceNo", "date", "partyId", "companyId", "fromDate", "toDate", "entryIds",
+    "freightAmount", "sgstPercent", "cgstPercent", "gstPaidByParty", "total", "notes",
+    "kind", "direction", "createdAt",
+  ],
+  entries: [
+    "id", "direction", "invoiceNo", "date", "partyId", "consignee", "qty", "rate", "amount",
+    "detention", "detentionRemark", "vehicleNo", "driverId", "driverExpenses",
+    "vehicleExpenses", "photos", "remarks", "invoiceId", "createdAt",
+  ],
+};
+
+/**
+ * Columns typed as date or numeric. A form that was never filled in leaves ""
+ * behind, which Postgres won't take for either — those become null.
+ */
+const NOT_TEXT: Record<TableName, string[]> = {
+  companies: [],
+  parties: [],
+  drivers: ["monthlyPay"],
+  vehicles: ["capacityMt", "insuranceExpiry", "fitnessExpiry", "permitExpiry", "pucExpiry"],
+  invoices: ["freightAmount", "sgstPercent", "cgstPercent", "total", "date", "fromDate", "toDate"],
+  entries: ["qty", "rate", "amount", "detention", "date"],
+};
+
+function sanitiseRow(table: TableName, row: Record<string, unknown>) {
+  const out: Record<string, unknown> = {};
+  for (const col of COLUMNS[table]) {
+    if (!(col in row)) continue;
+    const v = row[col];
+    if (v === undefined) continue;
+    out[col] = v === "" && NOT_TEXT[table].includes(col) ? null : v;
+  }
+  return out;
+}
+
+function missingRows(table: TableName, incoming: DB, existing: DB): Record<string, unknown>[] {
+  const have = new Set((existing[table] as { id: string }[]).map((r) => r.id));
+  return (incoming[table] as { id: string }[])
+    .filter((r) => r.id && !have.has(r.id))
+    .map((r) => sanitiseRow(table, r as unknown as Record<string, unknown>));
 }
 
 /* ------------------------------------------------------------------ local */
@@ -136,6 +269,19 @@ class LocalRepo implements Repo {
 
   async replaceAll(db: DB) {
     this.write(db);
+  }
+
+  async merge(incoming: DB, existing: DB): Promise<MergeCounts> {
+    const db = this.read();
+    const counts: MergeCounts = {};
+    for (const t of MERGE_ORDER) {
+      const add = missingRows(t, incoming, existing);
+      if (!add.length) continue;
+      (db[t] as unknown as unknown[]).push(...add);
+      counts[t] = add.length;
+    }
+    this.write(db);
+    return counts;
   }
 }
 
@@ -231,6 +377,38 @@ class SupabaseRepo implements Repo {
     await seed("invoices", db.invoices);
     await seed("entries", db.entries);
     await this.saveCompany(db.company);
+  }
+
+  /**
+   * Lifts rows the cloud doesn't have yet into it. Anything already there is
+   * left exactly as it is, so this is safe to run twice and can't clobber
+   * work somebody else has done in the meantime.
+   */
+  async merge(incoming: DB, existing: DB): Promise<MergeCounts> {
+    const sb = getSupabase()!;
+    const counts: MergeCounts = {};
+
+    for (const t of MERGE_ORDER) {
+      const add = missingRows(t, incoming, existing);
+      if (!add.length) continue;
+
+      // Chunked: a few hundred entries with photo data is a big payload.
+      for (let i = 0; i < add.length; i += 200) {
+        const { error } = await sb.from(t).insert(add.slice(i, i + 200));
+        if (error) throw new Error(`Could not upload ${t}: ${error.message}`);
+      }
+      counts[t] = add.length;
+    }
+
+    // The letterhead only moves up if the cloud is still on the defaults —
+    // whatever is already saved there wins.
+    const untouched =
+      existing.company.name === DEFAULT_COMPANY.name && !existing.company.logo;
+    if (untouched && incoming.company && incoming.company.name !== DEFAULT_COMPANY.name) {
+      await this.saveCompany(incoming.company);
+    }
+
+    return counts;
   }
 }
 

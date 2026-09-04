@@ -1,7 +1,16 @@
 "use client";
 
 import { useRef, useState } from "react";
-import { Database, HardDrive, Download, Upload, AlertTriangle, Check, Smartphone } from "lucide-react";
+import {
+  Database,
+  HardDrive,
+  Download,
+  Upload,
+  UploadCloud,
+  AlertTriangle,
+  Check,
+  Smartphone,
+} from "lucide-react";
 import type { CompanyProfile, DB } from "@/lib/types";
 import { useStore } from "@/lib/store";
 import { DEFAULT_COMPANY, normaliseEntry } from "@/lib/repo";
@@ -15,7 +24,30 @@ export default function SettingsPage() {
   const [confirmReset, setConfirmReset] = useState(false);
   const [importError, setImportError] = useState<string | null>(null);
   const [restored, setRestored] = useState(false);
+  const [migrating, setMigrating] = useState(false);
+  const [migrated, setMigrated] = useState<string | null>(null);
+  const [migrateError, setMigrateError] = useState<string | null>(null);
+  const [confirmDiscard, setConfirmDiscard] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
+
+  /** Lifts the browser's leftover data into the shared database. */
+  async function adopt() {
+    setMigrating(true);
+    setMigrateError(null);
+    setMigrated(null);
+    try {
+      const counts = await store.adoptLocalData();
+      const moved = Object.entries(counts)
+        .filter(([, n]) => n)
+        .map(([table, n]) => `${n} ${table}`)
+        .join(", ");
+      setMigrated(moved ? `Moved ${moved} into the shared database.` : "Everything was already there.");
+    } catch (e: any) {
+      setMigrateError(e?.message ?? String(e));
+    } finally {
+      setMigrating(false);
+    }
+  }
 
   const set = <K extends keyof CompanyProfile>(k: K, v: CompanyProfile[K]) =>
     setCompany((p) => ({ ...p, [k]: v }));
@@ -91,6 +123,71 @@ export default function SettingsPage() {
           </button>
         }
       />
+
+      {store.strandedCount > 0 && (
+        <Card
+          className="mb-5 border-gold-300"
+          title="Data still in this browser"
+          subtitle="From before the shared database was connected."
+        >
+          <p className="text-sm text-navy-600">
+            While the app had no cloud database it saved everything here in the browser, which is
+            why a second person signing in saw nothing. There{" "}
+            {store.strandedCount === 1 ? "is" : "are"} <strong>{store.strandedCount}</strong>{" "}
+            record{store.strandedCount === 1 ? "" : "s"} waiting:
+          </p>
+
+          <div className="mt-3 flex flex-wrap gap-2 text-xs">
+            {(
+              [
+                ["entries", store.strandedLocal?.entries.length],
+                ["invoices", store.strandedLocal?.invoices.length],
+                ["parties", store.strandedLocal?.parties.length],
+                ["companies", store.strandedLocal?.companies.length],
+                ["drivers", store.strandedLocal?.drivers.length],
+                ["vehicles", store.strandedLocal?.vehicles.length],
+              ] as const
+            )
+              .filter(([, n]) => (n ?? 0) > 0)
+              .map(([label, n]) => (
+                <span
+                  key={label}
+                  className="rounded-full bg-navy-100 px-2.5 py-1 font-bold text-navy-700"
+                >
+                  {n} {label}
+                </span>
+              ))}
+          </div>
+
+          <p className="mt-3 text-xs text-navy-500">
+            Moving them across only adds what the shared database doesn&apos;t already have — it
+            never overwrites or deletes anything, so it&apos;s safe to run.
+          </p>
+
+          {migrated && (
+            <p className="mt-3 flex items-center gap-1.5 text-sm font-semibold text-emerald-600">
+              <Check size={15} /> {migrated}
+            </p>
+          )}
+          {migrateError && (
+            <p className="mt-3 text-sm font-semibold text-red-600">{migrateError}</p>
+          )}
+
+          <div className="mt-4 flex flex-wrap gap-2">
+            <button onClick={adopt} className="btn-primary" disabled={migrating}>
+              <UploadCloud size={16} />
+              {migrating ? "Moving…" : "Move into the shared database"}
+            </button>
+            <button
+              onClick={() => setConfirmDiscard(true)}
+              className="btn-ghost"
+              disabled={migrating}
+            >
+              Discard the browser copy
+            </button>
+          </div>
+        </Card>
+      )}
 
       <div className="grid gap-5 lg:grid-cols-3">
         <Card
@@ -277,6 +374,35 @@ NEXT_PUBLIC_SUPABASE_ANON_KEY=…`}
         </p>
         <p className="mt-3 rounded-lg bg-gold-50 px-3 py-2 text-sm text-gold-900">
           Download a backup first — this cannot be undone.
+        </p>
+      </Modal>
+
+      <Modal
+        open={confirmDiscard}
+        onClose={() => setConfirmDiscard(false)}
+        title="Throw away the browser copy?"
+        footer={
+          <>
+            <button className="btn-ghost" onClick={() => setConfirmDiscard(false)}>
+              Cancel
+            </button>
+            <button
+              className="btn-danger"
+              onClick={() => {
+                store.discardLocalData();
+                setConfirmDiscard(false);
+              }}
+            >
+              Discard it
+            </button>
+          </>
+        }
+      >
+        <p className="text-sm text-navy-600">
+          The <strong>{store.strandedCount}</strong> record
+          {store.strandedCount === 1 ? "" : "s"} saved in this browser will be deleted without
+          being uploaded. Only do this if you&apos;re sure they&apos;re already in the shared
+          database.
         </p>
       </Modal>
     </>

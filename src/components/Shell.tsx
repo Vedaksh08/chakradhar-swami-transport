@@ -20,6 +20,7 @@ import {
   BarChart3,
   ShieldCheck,
   Lock,
+  AlertTriangle,
 } from "lucide-react";
 import type { Permission } from "@/lib/types";
 import { useStore } from "@/lib/store";
@@ -59,7 +60,7 @@ export function Shell({ children }: { children: React.ReactNode }) {
   const router = useRouter();
   const [open, setOpen] = useState(false);
   const [signedInAs, setSignedInAs] = useState<string | null>(null);
-  const { company, backend, ready, error } = useStore();
+  const { company, backend, ready, error, strandedCount } = useStore();
   const access = useAccess();
 
   useEffect(() => {
@@ -232,6 +233,37 @@ export function Shell({ children }: { children: React.ReactNode }) {
         {error && (
           <div className="border-b border-red-200 bg-red-50 px-4 py-2 text-sm text-red-700">
             <strong className="font-semibold">Save failed:</strong> {error}
+          </div>
+        )}
+
+        {/* Without keys the app still runs, but every device keeps its own
+            private copy — the one failure mode nobody should discover late. */}
+        {backend === "local" && (
+          <div className="flex items-start gap-2 border-b border-red-200 bg-red-50 px-4 py-2.5 text-sm text-red-800">
+            <AlertTriangle size={16} className="mt-0.5 shrink-0" />
+            <p>
+              <strong className="font-bold">Not connected to the shared database.</strong> Anything
+              saved here stays in this browser and nobody else can see it. Add your Supabase keys
+              and redeploy.
+            </p>
+          </div>
+        )}
+
+        {strandedCount > 0 && (
+          <div className="flex flex-wrap items-center justify-between gap-3 border-b border-gold-300 bg-gold-50 px-4 py-2.5 text-sm text-gold-900">
+            <div className="flex items-start gap-2">
+              <Database size={16} className="mt-0.5 shrink-0" />
+              <p>
+                <strong className="font-bold">
+                  {strandedCount} record{strandedCount === 1 ? "" : "s"} are stuck in this browser
+                </strong>{" "}
+                from before the shared database was connected. Move them across so everyone works
+                off the same data.
+              </p>
+            </div>
+            <Link href="/settings" className="btn-primary btn-sm shrink-0">
+              Move them
+            </Link>
           </div>
         )}
 
