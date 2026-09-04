@@ -7,6 +7,7 @@ import {
   Download,
   Upload,
   UploadCloud,
+  FilePlus2,
   AlertTriangle,
   Check,
   Smartphone,
@@ -23,7 +24,8 @@ export default function SettingsPage() {
   const [saved, setSaved] = useState(false);
   const [confirmReset, setConfirmReset] = useState(false);
   const [importError, setImportError] = useState<string | null>(null);
-  const [restored, setRestored] = useState(false);
+  const [restored, setRestored] = useState<string | null>(null);
+  const mergeRef = useRef<HTMLInputElement>(null);
   const [migrating, setMigrating] = useState(false);
   const [migrated, setMigrated] = useState<string | null>(null);
   const [migrateError, setMigrateError] = useState<string | null>(null);
@@ -68,37 +70,71 @@ export default function SettingsPage() {
     URL.revokeObjectURL(url);
   }
 
+  /** Turns a backup file into a DB, or explains why it can't. */
+  async function parseBackup(file: File): Promise<DB> {
+    const parsed = JSON.parse(await file.text()) as Partial<DB>;
+    const required: (keyof DB)[] = [
+      "parties",
+      "companies",
+      "drivers",
+      "vehicles",
+      "entries",
+      "invoices",
+    ];
+    const malformed = required.filter((k) => parsed[k] !== undefined && !Array.isArray(parsed[k]));
+    if (!Array.isArray(parsed.entries) || !Array.isArray(parsed.parties) || malformed.length) {
+      throw new Error("This file doesn't look like a backup.");
+    }
+    return {
+      parties: parsed.parties ?? [],
+      companies: parsed.companies ?? [],
+      drivers: parsed.drivers ?? [],
+      vehicles: parsed.vehicles ?? [],
+      entries: (parsed.entries ?? []).map(normaliseEntry),
+      invoices: parsed.invoices ?? [],
+      company: { ...store.company, ...(parsed.company ?? {}) },
+    };
+  }
+
+  /**
+   * Adds what the file has and this database doesn't.
+   *
+   * Browser storage can only be read by the site that wrote it, so when the
+   * old data sits in another browser — or on a phone, or at the address the
+   * app used to live at — a backup file is the only way to carry it over.
+   * Merging rather than replacing means several devices can each hand their
+   * copy in without wiping the last one.
+   */
+  async function addFromFile(file?: File) {
+    if (!file) return;
+    setImportError(null);
+    setRestored(null);
+    try {
+      const counts = await store.mergeFromBackup(await parseBackup(file));
+      const added = Object.entries(counts)
+        .filter(([, n]) => n)
+        .map(([table, n]) => `${n} ${table}`)
+        .join(", ");
+      setRestored(added ? `Added ${added}.` : "Everything in that file was already here.");
+      setTimeout(() => setRestored(null), 6000);
+    } catch (e: any) {
+      setImportError(e?.message ?? String(e));
+    } finally {
+      if (mergeRef.current) mergeRef.current.value = "";
+    }
+  }
+
+  /** Replaces everything with what the file holds. */
   async function restore(file?: File) {
     if (!file) return;
     setImportError(null);
-    setRestored(false);
+    setRestored(null);
     try {
-      const parsed = JSON.parse(await file.text()) as Partial<DB>;
-      const required: (keyof DB)[] = [
-        "parties",
-        "companies",
-        "drivers",
-        "vehicles",
-        "entries",
-        "invoices",
-      ];
-      const missing = required.filter((k) => parsed[k] !== undefined && !Array.isArray(parsed[k]));
-      if (!Array.isArray(parsed.entries) || !Array.isArray(parsed.parties) || missing.length) {
-        throw new Error("This file doesn't look like a backup.");
-      }
-      const nextCompany = { ...store.company, ...(parsed.company ?? {}) };
-      await store.importDB({
-        parties: parsed.parties ?? [],
-        companies: parsed.companies ?? [],
-        drivers: parsed.drivers ?? [],
-        vehicles: parsed.vehicles ?? [],
-        entries: (parsed.entries ?? []).map(normaliseEntry),
-        invoices: parsed.invoices ?? [],
-        company: nextCompany,
-      });
-      setCompany(nextCompany);
-      setRestored(true);
-      setTimeout(() => setRestored(false), 3000);
+      const incoming = await parseBackup(file);
+      await store.importDB(incoming);
+      setCompany(incoming.company);
+      setRestored("Restored — everything from the file is back.");
+      setTimeout(() => setRestored(null), 4000);
     } catch (e: any) {
       setImportError(e?.message ?? String(e));
     } finally {
@@ -304,9 +340,19 @@ NEXT_PUBLIC_SUPABASE_ANON_KEY=…`}
               <button onClick={backup} className="btn-ghost w-full">
                 <Download size={16} /> Download backup
               </button>
+              <button onClick={() => mergeRef.current?.click()} className="btn-ghost w-full">
+                <FilePlus2 size={16} /> Add from a file
+              </button>
               <button onClick={() => fileRef.current?.click()} className="btn-ghost w-full">
                 <Upload size={16} /> Restore from file
               </button>
+              <input
+                ref={mergeRef}
+                type="file"
+                accept="application/json"
+                className="hidden"
+                onChange={(e) => addFromFile(e.target.files?.[0])}
+              />
               <input
                 ref={fileRef}
                 type="file"
@@ -317,9 +363,15 @@ NEXT_PUBLIC_SUPABASE_ANON_KEY=…`}
               {importError && <p className="text-xs font-semibold text-red-600">{importError}</p>}
               {restored && (
                 <p className="flex items-center gap-1.5 text-xs font-semibold text-emerald-600">
-                  <Check size={14} /> Restored — everything from the file is back.
+                  <Check size={14} /> {restored}
                 </p>
               )}
+              <p className="mt-1 text-[11px] leading-relaxed text-navy-500">
+                <strong>Add</strong> keeps what&apos;s already here and brings in whatever the file
+                has on top — use it to carry data over from another browser, phone or the address
+                the app used to live at. <strong>Restore</strong> throws away what&apos;s here and
+                replaces it with the file.
+              </p>
             </div>
           </Card>
 

@@ -77,6 +77,12 @@ interface StoreValue {
   adoptLocalData: () => Promise<MergeCounts>;
   /** Throws the browser copy away without uploading it. */
   discardLocalData: () => void;
+  /**
+   * Same idea as `adoptLocalData`, but for data carried in from another
+   * browser or device as a backup file — browser storage can only ever be
+   * read by the site that wrote it, so a file is the only way across.
+   */
+  mergeFromBackup: (incoming: DB) => Promise<MergeCounts>;
 }
 
 const Ctx = createContext<StoreValue | null>(null);
@@ -492,6 +498,15 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     setStranded(null);
   }, []);
 
+  const mergeFromBackup = useCallback(
+    async (incoming: DB) => {
+      const counts = await repo.merge(incoming, db);
+      setDb(await repo.load());
+      return counts;
+    },
+    [db]
+  );
+
   const partyById = useMemo(() => new Map(db.parties.map((p) => [p.id, p])), [db.parties]);
   const companyById = useMemo(() => new Map(db.companies.map((c) => [c.id, c])), [db.companies]);
   const driverById = useMemo(() => new Map(db.drivers.map((d) => [d.id, d])), [db.drivers]);
@@ -626,6 +641,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     strandedCount: stranded ? countRows(stranded) : 0,
     adoptLocalData,
     discardLocalData,
+    mergeFromBackup,
   };
 
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;
