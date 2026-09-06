@@ -15,7 +15,7 @@ import {
   uid,
 } from "@/lib/calc";
 import { useStore } from "@/lib/store";
-import { Field, Input, Select, Textarea, cx } from "./ui";
+import { Combo, Field, Input, Textarea, cx } from "./ui";
 import { ExpenseLines } from "./ExpenseLines";
 import { PhotoLines } from "./PhotoLines";
 
@@ -103,44 +103,40 @@ export function EntryForm({
         <Field label="Date" required>
           <Input type="date" value={value.date} onChange={(e) => set("date", e.target.value)} />
         </Field>
-        <Field label="Vehicle No." required>
-          <Input
-            list="vehicle-numbers"
+        <Field label="Vehicle No." required hint="Type to search, or enter a new one">
+          <Combo
+            options={vehicleNumbers.map((v) => ({ value: v, label: v }))}
             value={value.vehicleNo}
-            onChange={(e) => set("vehicleNo", e.target.value.toUpperCase())}
+            onChange={(v) => set("vehicleNo", v.toUpperCase())}
+            transform={(s) => s.toUpperCase()}
+            allowCustom
             placeholder="MH12NX9008"
             className="uppercase"
           />
-          <datalist id="vehicle-numbers">
-            {vehicleNumbers.map((v) => (
-              <option key={v} value={v} />
-            ))}
-          </datalist>
         </Field>
       </div>
 
       <div className="grid gap-4 sm:grid-cols-2">
-        <Field label="Company / Party" required>
-          <Select value={value.partyId} onChange={(e) => set("partyId", e.target.value)}>
-            <option value="">Select party…</option>
-            {parties.map((p) => (
-              <option key={p.id} value={p.id}>
-                {p.name}
-              </option>
-            ))}
-          </Select>
+        <Field label="Company / Party" required hint="Type any part of the name">
+          <Combo
+            options={parties.map((p) => ({ value: p.id, label: p.name }))}
+            value={value.partyId}
+            onChange={(v) => set("partyId", v)}
+            placeholder="Search parties…"
+          />
         </Field>
         <Field label="Driver">
-          <Select value={value.driverId ?? ""} onChange={(e) => set("driverId", e.target.value)}>
-            <option value="">Select driver…</option>
-            {drivers
-              .filter((d) => d.active || d.id === value.driverId)
-              .map((d) => (
-                <option key={d.id} value={d.id}>
-                  {d.name}
-                </option>
-              ))}
-          </Select>
+          <Combo
+            options={[
+              { value: "", label: "No driver" },
+              ...drivers
+                .filter((d) => d.active || d.id === value.driverId)
+                .map((d) => ({ value: d.id, label: d.name, hint: d.phone })),
+            ]}
+            value={value.driverId ?? ""}
+            onChange={(v) => set("driverId", v || undefined)}
+            placeholder="Search drivers…"
+          />
         </Field>
       </div>
 
@@ -148,18 +144,15 @@ export function EntryForm({
         label="Delivered to"
         hint="Shows in the NAME column on the entry report. Leave blank to use the party name."
       >
-        <Input
-          list="consignee-names"
+        <Combo
+          options={consignees.map((c) => ({ value: c, label: c }))}
           value={value.consignee ?? ""}
-          onChange={(e) => set("consignee", e.target.value.toUpperCase())}
+          onChange={(v) => set("consignee", v.toUpperCase() || undefined)}
+          transform={(s) => s.toUpperCase()}
+          allowCustom
           placeholder="WHEELS INDIA LTD"
           className="uppercase"
         />
-        <datalist id="consignee-names">
-          {consignees.map((c) => (
-            <option key={c} value={c} />
-          ))}
-        </datalist>
       </Field>
 
       {/* Money */}

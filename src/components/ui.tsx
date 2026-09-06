@@ -1,8 +1,8 @@
 "use client";
 
-import React, { useEffect, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { createPortal } from "react-dom";
-import { X } from "lucide-react";
+import { X, ChevronDown } from "lucide-react";
 
 export function cx(...parts: (string | false | null | undefined)[]) {
   return parts.filter(Boolean).join(" ");
@@ -56,6 +56,223 @@ export const Textarea = React.forwardRef<
 >(function Textarea({ className, ...props }, ref) {
   return <textarea ref={ref} className={cx("field", className)} {...props} />;
 });
+
+/* ---------------------------------------------------------------- combobox */
+
+export interface ComboOption {
+  value: string;
+  label: string;
+  /** Small grey text on the right of the row — a code, a phone number. */
+  hint?: string;
+}
+
+/**
+ * A dropdown you can type into.
+ *
+ * A plain <select> makes you hunt through a hundred parties by eye; this
+ * narrows the list as you type while keeping the arrow for a straight browse.
+ * The list is portalled to <body> at fixed coordinates because these sit
+ * inside modals that scroll, and an absolutely positioned menu would be
+ * clipped by the modal's own overflow.
+ */
+export function Combo({
+  options,
+  value,
+  onChange,
+  placeholder = "Select…",
+  /** Let anything typed stand as the value — vehicle numbers, delivery names. */
+  allowCustom = false,
+  /** Applied to typed text before it's committed, e.g. uppercasing. */
+  transform,
+  disabled,
+  className,
+}: {
+  options: ComboOption[];
+  value: string;
+  onChange: (value: string) => void;
+  placeholder?: string;
+  allowCustom?: boolean;
+  transform?: (raw: string) => string;
+  disabled?: boolean;
+  className?: string;
+}) {
+  const [open, setOpen] = useState(false);
+  const [query, setQuery] = useState("");
+  const [active, setActive] = useState(0);
+  const [rect, setRect] = useState<{ left: number; top: number; width: number } | null>(null);
+
+  const inputRef = React.useRef<HTMLInputElement>(null);
+  const menuRef = React.useRef<HTMLDivElement>(null);
+  const [mounted, setMounted] = useState(false);
+  useEffect(() => setMounted(true), []);
+
+  const selected = options.find((o) => o.value === value);
+  const shownText = open ? query : (selected?.label ?? (allowCustom ? value : ""));
+
+  const matches = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    if (!open || !q) return options;
+    // Anything containing what was typed, with the closest starts-with
+    // matches lifted to the top.
+    const hit = options.filter((o) => o.label.toLowerCase().includes(q));
+    return hit.sort((a, b) => {
+      const aStarts = a.label.toLowerCase().startsWith(q) ? 0 : 1;
+      const bStarts = b.label.toLowerCase().startsWith(q) ? 0 : 1;
+      return aStarts - bStarts;
+    });
+  }, [options, query, open]);
+
+  const place = useCallback(() => {
+    const el = inputRef.current;
+    if (!el) return;
+    const r = el.getBoundingClientRect();
+    setRect({ left: r.left, top: r.bottom + 4, width: r.width });
+  }, []);
+
+  useEffect(() => {
+    if (!open) return;
+    place();
+    // Capture phase so a scroll inside the modal body is caught too.
+    window.addEventListener("scroll", place, true);
+    window.addEventListener("resize", place);
+    return () => {
+      window.removeEventListener("scroll", place, true);
+      window.removeEventListener("resize", place);
+    };
+  }, [open, place]);
+
+  useEffect(() => {
+    if (!open) return;
+    const onDown = (e: MouseEvent) => {
+      const t = e.target as Node;
+      if (inputRef.current?.parentElement?.contains(t)) return;
+      if (menuRef.current?.contains(t)) return;
+      close(false);
+    };
+    document.addEventListener("mousedown", onDown);
+    return () => document.removeEventListener("mousedown", onDown);
+  });
+
+  function close(commitTyped: boolean) {
+    if (commitTyped && allowCustom) {
+      const raw = transform ? transform(query) : query;
+      if (raw !== value) onChange(raw);
+    }
+    setOpen(false);
+    setQuery("");
+  }
+
+  function pick(option: ComboOption) {
+    onChange(option.value);
+    setOpen(false);
+    setQuery("");
+  }
+
+  function openList() {
+    if (disabled) return;
+    setQuery("");
+    setActive(0);
+    setOpen(true);
+  }
+
+  return (
+    <div className="relative">
+      <div className="flex">
+        <input
+          ref={inputRef}
+          className={cx("field pr-9", className)}
+          value={shownText}
+          placeholder={placeholder}
+          disabled={disabled}
+          autoComplete="off"
+          onFocus={openList}
+          onChange={(e) => {
+            if (!open) setOpen(true);
+            setQuery(transform ? transform(e.target.value) : e.target.value);
+            setActive(0);
+          }}
+          onKeyDown={(e) => {
+            if (e.key === "ArrowDown") {
+              e.preventDefault();
+              if (!open) return openList();
+              setActive((i) => Math.min(i + 1, matches.length - 1));
+            } else if (e.key === "ArrowUp") {
+              e.preventDefault();
+              setActive((i) => Math.max(i - 1, 0));
+            } else if (e.key === "Enter") {
+              if (!open) return;
+              e.preventDefault();
+              if (matches[active]) pick(matches[active]);
+              else close(true);
+            } else if (e.key === "Escape") {
+              e.preventDefault();
+              close(false);
+            } else if (e.key === "Tab") {
+              close(true);
+            }
+          }}
+        />
+        <button
+          type="button"
+          tabIndex={-1}
+          disabled={disabled}
+          onMouseDown={(e) => {
+            // mousedown, not click: the outside-click handler would otherwise
+            // close the list before this ever fired.
+            e.preventDefault();
+            open ? close(true) : (inputRef.current?.focus(), openList());
+          }}
+          className="pointer-events-auto absolute right-0 top-0 grid h-full w-9 place-items-center text-navy-400 transition hover:text-navy-700 disabled:opacity-40"
+          aria-label="Show list"
+        >
+          <ChevronDown size={16} className={cx("transition", open && "rotate-180")} />
+        </button>
+      </div>
+
+      {open &&
+        mounted &&
+        rect &&
+        createPortal(
+          <div
+            ref={menuRef}
+            style={{ left: rect.left, top: rect.top, width: rect.width }}
+            className="animate-fade fixed z-[60] max-h-64 overflow-y-auto overscroll-contain rounded-lg border border-navy-200 bg-white py-1 shadow-pop"
+          >
+            {matches.length === 0 ? (
+              <p className="px-3 py-2.5 text-xs text-navy-400">
+                {allowCustom
+                  ? "Nothing matches — press Enter to use what you typed."
+                  : "Nothing matches."}
+              </p>
+            ) : (
+              matches.map((o, i) => (
+                <button
+                  key={o.value || `blank-${i}`}
+                  type="button"
+                  onMouseEnter={() => setActive(i)}
+                  onMouseDown={(e) => {
+                    e.preventDefault();
+                    pick(o);
+                  }}
+                  className={cx(
+                    "flex w-full items-center justify-between gap-3 px-3 py-2 text-left text-sm transition",
+                    i === active ? "bg-navy-100 text-navy-900" : "text-navy-700 hover:bg-navy-50",
+                    o.value === value && "font-bold"
+                  )}
+                >
+                  <span className="min-w-0 truncate">{o.label}</span>
+                  {o.hint && (
+                    <span className="shrink-0 font-mono text-[11px] text-navy-400">{o.hint}</span>
+                  )}
+                </button>
+              ))
+            )}
+          </div>,
+          document.body
+        )}
+    </div>
+  );
+}
 
 /* ------------------------------------------------------------------- cards */
 

@@ -24,7 +24,7 @@ import {
   today,
   toISODate,
 } from "@/lib/calc";
-import { Card, Chip, EmptyState, PageHeader, Select, Stat, Table, cx } from "@/components/ui";
+import { Card, Chip, Combo, EmptyState, PageHeader, Select, Stat, Table, cx } from "@/components/ui";
 
 type RangeKey = "today" | "week" | "month" | "all";
 
@@ -138,19 +138,17 @@ export default function DashboardPage() {
         subtitle={`${label} · ${scoped.length} ${scoped.length === 1 ? "entry" : "entries"}`}
         actions={
           <>
-            <Select
-              value={partyFilter}
-              onChange={(e) => setPartyFilter(e.target.value)}
-              className="w-auto"
-              aria-label="Filter by party"
-            >
-              <option value="">All parties</option>
-              {parties.map((p) => (
-                <option key={p.id} value={p.id}>
-                  {p.name}
-                </option>
-              ))}
-            </Select>
+            <div className="min-w-[190px]">
+              <Combo
+                options={[
+                  { value: "", label: "All parties" },
+                  ...parties.map((p) => ({ value: p.id, label: p.name })),
+                ]}
+                value={partyFilter}
+                onChange={setPartyFilter}
+                placeholder="All parties"
+              />
+            </div>
             <Select
               value={range}
               onChange={(e) => setRange(e.target.value as RangeKey)}

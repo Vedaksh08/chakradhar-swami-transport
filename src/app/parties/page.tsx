@@ -14,7 +14,7 @@ import {
   Input,
   Modal,
   PageHeader,
-  Select,
+  Combo,
   Stat,
   Table,
   Textarea,
@@ -257,19 +257,15 @@ export default function PartiesPage() {
               label="Company"
               hint="Optional — group this party under a company to bill them together."
             >
-              <Select
+              <Combo
+                options={[
+                  { value: "", label: "No company — bill this party directly" },
+                  ...companies.map((c) => ({ value: c.id, label: c.name, hint: c.code })),
+                ]}
                 value={draft.companyId ?? ""}
-                onChange={(e) =>
-                  setDraft({ ...draft, companyId: e.target.value || undefined })
-                }
-              >
-                <option value="">No company — bill this party directly</option>
-                {companies.map((c) => (
-                  <option key={c.id} value={c.id}>
-                    {c.name}
-                  </option>
-                ))}
-              </Select>
+                onChange={(v) => setDraft({ ...draft, companyId: v || undefined })}
+                placeholder="Search companies…"
+              />
             </Field>
             <Field label="Branch address">
               <Textarea

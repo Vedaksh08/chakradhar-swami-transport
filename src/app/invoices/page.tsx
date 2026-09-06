@@ -33,7 +33,7 @@ import {
   Input,
   Modal,
   PageHeader,
-  Select,
+  Combo,
   Stat,
   Table,
   Textarea,
@@ -496,26 +496,19 @@ function InvoiceBuilder({
             </div>
 
             {mode === "party" ? (
-              <Select value={inv.partyId ?? ""} onChange={(e) => set("partyId", e.target.value)}>
-                <option value="">Select party…</option>
-                {parties.map((p) => (
-                  <option key={p.id} value={p.id}>
-                    {p.name}
-                  </option>
-                ))}
-              </Select>
+              <Combo
+                options={parties.map((p) => ({ value: p.id, label: p.name }))}
+                value={inv.partyId ?? ""}
+                onChange={(v) => set("partyId", v)}
+                placeholder="Search parties…"
+              />
             ) : (
-              <Select
+              <Combo
+                options={companies.map((c) => ({ value: c.id, label: c.name, hint: c.code }))}
                 value={inv.companyId ?? ""}
-                onChange={(e) => set("companyId", e.target.value)}
-              >
-                <option value="">Select company…</option>
-                {companies.map((c) => (
-                  <option key={c.id} value={c.id}>
-                    {c.name}
-                  </option>
-                ))}
-              </Select>
+                onChange={(v) => set("companyId", v)}
+                placeholder="Search companies…"
+              />
             )}
           </div>
         </Field>

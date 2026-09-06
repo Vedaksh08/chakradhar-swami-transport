@@ -16,7 +16,7 @@ import {
   today,
 } from "@/lib/calc";
 import { groupBy, inRangeLoose, standingExpenses, totalsFor, type GroupRow } from "@/lib/report";
-import { Card, EmptyState, Field, Input, PageHeader, Select, Table, cx } from "@/components/ui";
+import { Card, Combo, EmptyState, Field, Input, PageHeader, Table, cx } from "@/components/ui";
 import { downloadCsv } from "@/lib/csv";
 
 type Kind = "party" | "vehicle" | "driver" | "detail";
@@ -167,34 +167,37 @@ export default function ReportsPage() {
               <Input type="date" value={to} onChange={(e) => setTo(e.target.value)} />
             </Field>
             <Field label="Party">
-              <Select value={partyId} onChange={(e) => setPartyId(e.target.value)}>
-                <option value="">All parties</option>
-                {parties.map((p) => (
-                  <option key={p.id} value={p.id}>
-                    {p.name}
-                  </option>
-                ))}
-              </Select>
+              <Combo
+                options={[
+                  { value: "", label: "All parties" },
+                  ...parties.map((p) => ({ value: p.id, label: p.name })),
+                ]}
+                value={partyId}
+                onChange={setPartyId}
+                placeholder="All parties"
+              />
             </Field>
             <Field label="Vehicle">
-              <Select value={vehicleNo} onChange={(e) => setVehicleNo(e.target.value)}>
-                <option value="">All vehicles</option>
-                {vehicleNumbers.map((v) => (
-                  <option key={v} value={v}>
-                    {v}
-                  </option>
-                ))}
-              </Select>
+              <Combo
+                options={[
+                  { value: "", label: "All vehicles" },
+                  ...vehicleNumbers.map((v) => ({ value: v, label: v })),
+                ]}
+                value={vehicleNo}
+                onChange={setVehicleNo}
+                placeholder="All vehicles"
+              />
             </Field>
             <Field label="Driver">
-              <Select value={driverId} onChange={(e) => setDriverId(e.target.value)}>
-                <option value="">All drivers</option>
-                {drivers.map((d) => (
-                  <option key={d.id} value={d.id}>
-                    {d.name}
-                  </option>
-                ))}
-              </Select>
+              <Combo
+                options={[
+                  { value: "", label: "All drivers" },
+                  ...drivers.map((d) => ({ value: d.id, label: d.name })),
+                ]}
+                value={driverId}
+                onChange={setDriverId}
+                placeholder="All drivers"
+              />
             </Field>
           </div>
         </Card>
