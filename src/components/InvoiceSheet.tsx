@@ -1,7 +1,7 @@
 "use client";
 
 import type { CompanyProfile, Invoice } from "@/lib/types";
-import { fmtDate, inr, num } from "@/lib/calc";
+import { fmtDate, inr, num, round2 } from "@/lib/calc";
 
 /** Whoever the invoice is made out to — a party, or a company billed on their behalf. */
 export interface BillTo {
@@ -27,6 +27,10 @@ export function InvoiceSheet({
   gstAmount: number;
   amountWords: string;
 }) {
+  // Split out so each tax shows against its own line, the way a GST bill reads.
+  const sgstAmount = round2((invoice.freightAmount * num(invoice.sgstPercent)) / 100);
+  const cgstAmount = round2((invoice.freightAmount * num(invoice.cgstPercent)) / 100);
+
   return (
     <div className="print-page inv-sheet">
       <style>{CSS}</style>
@@ -108,23 +112,20 @@ export function InvoiceSheet({
         <div className="line" />
       </div>
 
+      {/* Three columns only: the vehicle, route and rate belong on the
+          annexure, and left blank here they only made the bill look unfinished. */}
       <table className="transport-table">
         <thead>
           <tr>
-            <th className="col-no">No.</th>
-            <th className="col-vehicle">Veh. No.</th>
-            <th className="col-from">From</th>
-            <th className="col-to">To</th>
-            <th className="col-rate">Rate</th>
-            <th className="col-trip">Trip</th>
+            <th className="col-sr">Sr No.</th>
+            <th className="col-desc">Description</th>
             <th className="col-amount">Amount</th>
           </tr>
         </thead>
         <tbody>
           <tr className="transport-description-row">
-            <td />
-            <td />
-            <td colSpan={2}>
+            <td className="sr-cell">1</td>
+            <td>
               <div className="transport-description">
                 {invoice.kind === "other" ? (
                   "OTHER BILLING"
@@ -140,45 +141,33 @@ export function InvoiceSheet({
                 )}
               </div>
             </td>
-            <td className="summary-label">Freight Amt.</td>
-            <td />
             <td className="summary-value">{inr(invoice.freightAmount)}</td>
           </tr>
 
-          <tr className="gst-row">
-            <td colSpan={4} />
-            <td className="summary-label">
-              {invoice.gstPaidByParty ? "GST Paid By Party" : "GST"}
-            </td>
-            <td className="summary-label">SGST%</td>
-            <td className="summary-value">
-              {invoice.gstPaidByParty ? "" : num(invoice.sgstPercent) || ""}
-            </td>
-          </tr>
-
-          <tr className="gst-row">
-            <td colSpan={4} />
-            <td />
-            <td className="summary-label">CGST%</td>
-            <td className="summary-value">
-              {invoice.gstPaidByParty ? "" : num(invoice.cgstPercent) || ""}
-            </td>
-          </tr>
-
-          {!invoice.gstPaidByParty && gstAmount > 0 && (
+          {invoice.gstPaidByParty ? (
             <tr className="gst-row">
-              <td colSpan={4} />
               <td />
-              <td className="summary-label">GST Amt.</td>
-              <td className="summary-value">{inr(gstAmount)}</td>
+              <td className="summary-label">GST Paid By Party</td>
+              <td className="summary-value" />
             </tr>
+          ) : (
+            <>
+              <tr className="gst-row">
+                <td />
+                <td className="summary-label">SGST @ {num(invoice.sgstPercent)}%</td>
+                <td className="summary-value">{inr(sgstAmount)}</td>
+              </tr>
+              <tr className="gst-row">
+                <td />
+                <td className="summary-label">CGST @ {num(invoice.cgstPercent)}%</td>
+                <td className="summary-value">{inr(cgstAmount)}</td>
+              </tr>
+            </>
           )}
 
           <tr className="total-row">
-            <td colSpan={4} />
-            <td colSpan={2} className="summary-label">
-              Total
-            </td>
+            <td />
+            <td className="summary-label">Total</td>
             <td className="summary-value">{inr(invoice.total)}</td>
           </tr>
         </tbody>
@@ -285,9 +274,10 @@ const CSS = `
 .transport-table td { padding: 6px 5px; border-right: 1px solid var(--line); border-bottom: 1px solid var(--line); font-size: 9.5px; vertical-align: top; word-wrap: break-word; }
 .transport-table td:last-child { border-right: 0; }
 .transport-table tbody tr:last-child td { border-bottom: 0; }
-.col-no { width: 5%; } .col-vehicle { width: 12%; } .col-from { width: 14%; } .col-to { width: 14%; }
-.col-rate { width: 12%; } .col-trip { width: 9%; } .col-amount { width: 15%; }
+.col-sr { width: 10%; } .col-desc { width: 62%; } .col-amount { width: 28%; }
+.sr-cell { text-align: center; font-weight: 700; color: var(--primary); }
 .transport-description-row td { height: 285px; vertical-align: top; padding-top: 15px; }
+.transport-description-row .summary-value { font-size: 11px; }
 .transport-description { color: var(--primary); font-size: 10px; font-weight: 800; line-height: 1.5; text-align: center; text-transform: uppercase; }
 .transport-period { display: block; margin-top: 6px; font-size: 9px; font-weight: 700; letter-spacing: .3px; }
 .summary-label { color: var(--muted); font-size: 8.5px !important; font-weight: 800; text-align: right; text-transform: uppercase; }
