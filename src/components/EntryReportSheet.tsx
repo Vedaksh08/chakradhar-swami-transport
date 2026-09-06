@@ -19,8 +19,6 @@ export function EntryReportSheet({
   invoiceNo,
   partyName,
   direction,
-  fromDate,
-  toDate,
   rows,
   total,
 }: {
@@ -28,8 +26,6 @@ export function EntryReportSheet({
   partyName?: string;
   /** Printed at the top so the annexure says which side of the ledger it covers. */
   direction?: "inward" | "outward";
-  fromDate?: string;
-  toDate?: string;
   rows: ReportRow[];
   total: number;
 }) {
@@ -74,11 +70,6 @@ export function EntryReportSheet({
         </tbody>
       </table>
 
-      {(fromDate || toDate) && (
-        <p className="rpt-foot">
-          Period {fromDate} to {toDate} · {rows.length} entries
-        </p>
-      )}
     </div>
   );
 }
@@ -123,7 +114,6 @@ const CSS = `
 .rpt-table th { text-align: center; font-weight: 700; }
 .rpt-table td.num { text-align: right; font-variant-numeric: tabular-nums; }
 .rpt-total td { font-weight: 700; }
-.rpt-foot { margin-top: 10px; font-size: 9px; color: #687386; }
 
 @media print {
   /* The page has no margin, so the whitespace lives here instead — see the

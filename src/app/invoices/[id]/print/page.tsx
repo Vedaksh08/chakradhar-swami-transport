@@ -148,8 +148,6 @@ export default function InvoicePrintPage() {
               partyName={billTo?.name}
               // Falls back to outward for bills raised before the split.
               direction={invoice.direction ?? "outward"}
-              fromDate={fmtDate(invoice.fromDate)}
-              toDate={fmtDate(invoice.toDate)}
               rows={rows.map((e) => ({
                 id: e.id,
                 date: fmtDate(e.date),

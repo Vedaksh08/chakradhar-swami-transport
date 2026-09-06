@@ -70,7 +70,7 @@ export function InvoiceSheet({
         <div className="invoice-title">Transport Invoice</div>
         <div className="invoice-number-box">
           <div className="label">Invoice / Bill No.</div>
-          <div className="value">#{invoice.invoiceNo}</div>
+          <div className="value">{invoice.invoiceNo}</div>
         </div>
       </div>
 
@@ -94,10 +94,8 @@ export function InvoiceSheet({
           <div className="label">Invoice No.</div>
           <div className="value">{invoice.invoiceNo}</div>
 
-          <div className="label">Period</div>
-          <div className="value">
-            {fmtDate(invoice.fromDate)} – {fmtDate(invoice.toDate)}
-          </div>
+          {/* The period now sits under the particulars description instead,
+              so it isn't stated twice on the same sheet. */}
 
           <div className="label">PAN</div>
           <div className="value">{company.pan}</div>
@@ -135,6 +133,9 @@ export function InvoiceSheet({
                     TRANSPORTATION CHARGES AS PER
                     <br />
                     DETAIL ATTACHED
+                    <span className="transport-period">
+                      PERIOD : {fmtDate(invoice.fromDate)} to {fmtDate(invoice.toDate)}
+                    </span>
                   </>
                 )}
               </div>
@@ -288,6 +289,7 @@ const CSS = `
 .col-rate { width: 12%; } .col-trip { width: 9%; } .col-amount { width: 15%; }
 .transport-description-row td { height: 285px; vertical-align: top; padding-top: 15px; }
 .transport-description { color: var(--primary); font-size: 10px; font-weight: 800; line-height: 1.5; text-align: center; text-transform: uppercase; }
+.transport-period { display: block; margin-top: 6px; font-size: 9px; font-weight: 700; letter-spacing: .3px; }
 .summary-label { color: var(--muted); font-size: 8.5px !important; font-weight: 800; text-align: right; text-transform: uppercase; }
 .summary-value { color: var(--primary); font-weight: 800; text-align: right; white-space: nowrap; font-variant-numeric: tabular-nums; }
 .gst-row td { background: #fbfcfe; }

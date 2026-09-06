@@ -669,8 +669,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
         db.company.invoicePrefix ?? "CST",
         parent ? companyById.get(parent)?.code : undefined,
         dateISO,
-        db.invoices,
-        partyId
+        db.invoices
       );
     },
     [db.invoices, db.company.invoicePrefix, partyById, companyById]
@@ -683,8 +682,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
         db.company.invoicePrefix ?? "CST",
         companyById.get(companyId)?.code,
         dateISO,
-        db.invoices,
-        companyId
+        db.invoices
       ),
     [db.invoices, db.company.invoicePrefix, companyById]
   );

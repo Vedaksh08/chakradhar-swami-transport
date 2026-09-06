@@ -126,30 +126,27 @@ export function settleMonth(
  *   CST / MTC / 01 / 26-27
  *   ^     ^     ^    ^
  *   |     |     |    financial year of the invoice date
- *   |     |     serial for whoever is billed, within that year
- *   |     the party's (or company's) short code
+ *   |     |     serial, running across the whole book for that year
+ *   |     the company's (or party's) short code
  *   company prefix
  *
- * The serial restarts each financial year, per party or company, so
- * numbering stays readable on a shelf of paper files. `billToId` is a
- * party id for a party-billed invoice, or a company id for one billed to a
- * company — `existing` rows are matched on whichever of the two they carry.
+ * One sequence for the business, not one per customer: switching to a
+ * different company carries on from the last number issued rather than
+ * starting again at 01, so the book reads straight through. The serial
+ * restarts only with the financial year.
  */
 export function buildInvoiceNo(
   prefix: string,
   billToCode: string | undefined,
   dateISO: string,
-  existing: { invoiceNo: string; partyId?: string; companyId?: string; date: string }[],
-  billToId: string
+  existing: { invoiceNo: string; partyId?: string; companyId?: string; date: string }[]
 ): string {
   const head = (prefix || "CST").trim().toUpperCase();
   const code = (billToCode || "").trim().toUpperCase();
   const fy = fyLabel(dateISO);
 
-  // Count this party's (or company's) invoices already in the same financial year.
-  const used = existing.filter(
-    (i) => (i.companyId || i.partyId) === billToId && fyLabel(i.date) === fy
-  );
+  // Every invoice already raised in this financial year, whoever it went to.
+  const used = existing.filter((i) => fyLabel(i.date) === fy);
 
   // Prefer continuing from the highest serial actually seen, so gaps from
   // deletions don't cause a collision.
