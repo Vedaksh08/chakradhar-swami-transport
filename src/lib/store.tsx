@@ -84,6 +84,16 @@ interface StoreValue {
    * read by the site that wrote it, so a file is the only way across.
    */
   mergeFromBackup: (incoming: DB) => Promise<MergeCounts>;
+
+  /**
+   * Applies a whole spreadsheet of entries at once, along with any parties
+   * and drivers it named that didn't exist yet.
+   */
+  importEntries: (input: {
+    entries: Entry[];
+    parties: Party[];
+    drivers: Driver[];
+  }) => Promise<void>;
 }
 
 const Ctx = createContext<StoreValue | null>(null);
@@ -553,6 +563,39 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     setStranded(null);
   }, []);
 
+  const importEntries = useCallback(
+    async (input: { entries: Entry[]; parties: Party[]; drivers: Driver[] }) => {
+      const mergeById = <T extends { id: string }>(current: T[], incoming: T[]) => {
+        if (!incoming.length) return current;
+        const byId = new Map(current.map((r) => [r.id, r]));
+        for (const row of incoming) byId.set(row.id, row);
+        return [...byId.values()];
+      };
+
+      await commit(
+        {
+          ...db,
+          parties: mergeById(db.parties, input.parties),
+          drivers: mergeById(db.drivers, input.drivers),
+          entries: mergeById(db.entries, input.entries),
+        },
+        async () => {
+          // Parties and drivers first: an entry points at both.
+          await repo.upsertMany("parties", input.parties);
+          await repo.upsertMany("drivers", input.drivers);
+          await repo.upsertMany("entries", input.entries);
+        }
+      );
+      audit(
+        "create",
+        "entries",
+        "import",
+        `Imported ${input.entries.length} entries from a file`
+      );
+    },
+    [db, commit, audit]
+  );
+
   const mergeFromBackup = useCallback(
     async (incoming: DB) => {
       const counts = await repo.merge(incoming, db);
@@ -697,6 +740,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     adoptLocalData,
     discardLocalData,
     mergeFromBackup,
+    importEntries,
   };
 
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;

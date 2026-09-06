@@ -10,6 +10,7 @@ import {
   entryVehicleExpenses,
   inr,
   num,
+  roundRupees,
   today,
   uid,
 } from "@/lib/calc";
@@ -187,18 +188,21 @@ export function EntryForm({
             hint={
               amountTouched && suggested !== value.amount
                 ? `Edited — qty × rate = ${inr(suggested)}`
-                : "Auto: qty × rate"
+                : "Auto: qty × rate, to the nearest rupee"
             }
           >
             <div className="flex gap-1.5">
               <Input
                 type="number"
-                step="0.01"
+                step="1"
                 value={value.amount || ""}
                 onChange={(e) => {
                   setAmountTouched(true);
                   set("amount", num(e.target.value));
                 }}
+                // Rounded when the field is left rather than as it's typed,
+                // so "1234.5" can still be typed out in full.
+                onBlur={(e) => set("amount", roundRupees(e.target.value))}
                 className={cx("font-semibold", amountTouched && "border-gold-400 bg-gold-50")}
               />
               {amountTouched && (

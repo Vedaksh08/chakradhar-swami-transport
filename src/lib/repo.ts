@@ -68,6 +68,8 @@ export interface Repo {
   update<T extends { id: string }>(table: TableName, row: T): Promise<void>;
   remove(table: TableName, id: string): Promise<void>;
   saveCompany(c: CompanyProfile): Promise<void>;
+  /** Writes many rows at once — an import of hundreds shouldn't be hundreds of trips. */
+  upsertMany<T extends { id: string }>(table: TableName, rows: T[]): Promise<void>;
   replaceAll(db: DB): Promise<void>;
   /** Adds rows that aren't there yet. Never overwrites, never deletes. */
   merge(incoming: DB, existing: DB): Promise<MergeCounts>;
@@ -267,6 +269,16 @@ class LocalRepo implements Repo {
     this.write(db);
   }
 
+  async upsertMany<T extends { id: string }>(table: TableName, rows: T[]) {
+    if (!rows.length) return;
+    const db = this.read();
+    const list = db[table] as unknown as T[];
+    const byId = new Map(list.map((r) => [r.id, r]));
+    for (const row of rows) byId.set(row.id, row);
+    (db[table] as unknown as T[]) = [...byId.values()];
+    this.write(db);
+  }
+
   async replaceAll(db: DB) {
     this.write(db);
   }
@@ -343,6 +355,16 @@ class SupabaseRepo implements Repo {
   async saveCompany(company: CompanyProfile) {
     const { error } = await getSupabase()!.from("company").upsert({ id: 1, ...company });
     if (error) throw error;
+  }
+
+  async upsertMany<T extends { id: string }>(table: TableName, rows: T[]) {
+    if (!rows.length) return;
+    const sb = getSupabase()!;
+    // Chunked: entries carry photo data, so a big import is a big payload.
+    for (let i = 0; i < rows.length; i += 200) {
+      const { error } = await sb.from(table).upsert(rows.slice(i, i + 200));
+      if (error) throw error;
+    }
   }
 
   async replaceAll(db: DB) {

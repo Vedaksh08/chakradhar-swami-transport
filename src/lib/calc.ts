@@ -9,9 +9,23 @@ export function round2(n: unknown): number {
   return Math.round((num(n) + Number.EPSILON) * 100) / 100;
 }
 
-/** What the entry auto-fills as its amount. Always editable afterwards. */
+/**
+ * Rounds to whole rupees the way the paperwork does: anything under half a
+ * rupee drops off, half or more counts as one. 1234.49 -> 1234, 1234.50 ->
+ * 1235. Written sign-aware so a negative rounds away from zero too, rather
+ * than JavaScript's habit of rounding -2.5 up to -2.
+ */
+export function roundRupees(v: unknown): number {
+  const n = num(v);
+  return n < 0 ? -Math.round(-n) : Math.round(n);
+}
+
+/**
+ * What the entry auto-fills as its amount. Always editable afterwards.
+ * Comes out at whole rupees — that is what goes on the bill.
+ */
 export function autoAmount(qty: unknown, rate: unknown): number {
-  return round2(num(qty) * num(rate));
+  return roundRupees(num(qty) * num(rate));
 }
 
 /** What the party is billed for this trip: amount + detention. */

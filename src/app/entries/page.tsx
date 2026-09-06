@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import {
   Plus,
@@ -13,6 +13,7 @@ import {
   ArrowDownLeft,
   ArrowUpRight,
   Clock,
+  Upload,
 } from "lucide-react";
 import type { Entry } from "@/lib/types";
 import { useStore } from "@/lib/store";
@@ -41,6 +42,7 @@ import {
 import { EntryForm, blankEntry } from "@/components/EntryForm";
 import { PhotoStrip } from "@/components/PhotoLines";
 import { downloadCsv } from "@/lib/csv";
+import { buildImportPlan, type ImportPlan } from "@/lib/entryImport";
 
 export default function EntriesPage() {
   const store = useStore();
@@ -67,6 +69,10 @@ export default function EntriesPage() {
   const [confirmDelete, setConfirmDelete] = useState<Entry | null>(null);
   const [photos, setPhotos] = useState<Entry | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
+  const [plan, setPlan] = useState<ImportPlan | null>(null);
+  const [importing, setImporting] = useState(false);
+  const [importError, setImportError] = useState<string | null>(null);
+  const importRef = useRef<HTMLInputElement>(null);
 
   const filtered = useMemo(() => {
     const needle = q.trim().toLowerCase();
@@ -169,6 +175,45 @@ export default function EntriesPage() {
     flash("Sent to the owner for approval. The entry stays as it was until then.");
   }
 
+  /** Reads the chosen file and works out what it would do, before doing it. */
+  async function readImport(file?: File) {
+    if (!file) return;
+    setImportError(null);
+    try {
+      const text = await file.text();
+      setPlan(buildImportPlan(text, { entries, parties, drivers }));
+    } catch (e: any) {
+      setImportError(e?.message ?? String(e));
+    } finally {
+      if (importRef.current) importRef.current.value = "";
+    }
+  }
+
+  async function applyImport() {
+    if (!plan) return;
+    setImporting(true);
+    setImportError(null);
+    try {
+      await store.importEntries({
+        entries: [...plan.added, ...plan.updated.map((u) => u.next)],
+        parties: plan.newParties,
+        drivers: plan.newDrivers,
+      });
+      const bits = [
+        plan.added.length && `${plan.added.length} added`,
+        plan.updated.length && `${plan.updated.length} updated`,
+        plan.newParties.length && `${plan.newParties.length} new ${plan.newParties.length === 1 ? "party" : "parties"}`,
+        plan.newDrivers.length && `${plan.newDrivers.length} new ${plan.newDrivers.length === 1 ? "driver" : "drivers"}`,
+      ].filter(Boolean);
+      setPlan(null);
+      flash(`Imported — ${bits.join(", ")}.`);
+    } catch (e: any) {
+      setImportError(e?.message ?? String(e));
+    } finally {
+      setImporting(false);
+    }
+  }
+
   function exportCsv() {
     downloadCsv(
       [
@@ -221,15 +266,28 @@ export default function EntriesPage() {
         actions={
           <>
             {isOwner && (
-              <button onClick={exportCsv} className="btn-ghost" disabled={!filtered.length}>
-                <Download size={16} /> Export
-              </button>
+              <>
+                <button onClick={() => importRef.current?.click()} className="btn-ghost">
+                  <Upload size={16} /> Import
+                </button>
+                <button onClick={exportCsv} className="btn-ghost" disabled={!filtered.length}>
+                  <Download size={16} /> Export
+                </button>
+              </>
             )}
             <button onClick={openNew} className="btn-primary" disabled={!parties.length}>
               <Plus size={16} /> New entry
             </button>
           </>
         }
+      />
+
+      <input
+        ref={importRef}
+        type="file"
+        accept=".csv,text/csv"
+        className="hidden"
+        onChange={(e) => readImport(e.target.files?.[0])}
       />
 
       {notice && (
@@ -539,6 +597,151 @@ export default function EntriesPage() {
           </p>
         )}
         {draft && <EntryForm value={draft} onChange={setDraft} />}
+      </Modal>
+
+      {/* Import preview — nothing is written until this is confirmed. */}
+      <Modal
+        open={!!plan}
+        onClose={() => setPlan(null)}
+        title="Import entries"
+        subtitle={plan ? `${plan.totalRows} rows read from the file` : undefined}
+        wide
+        footer={
+          <>
+            <button className="btn-ghost" onClick={() => setPlan(null)}>
+              Cancel
+            </button>
+            <button
+              className="btn-primary"
+              onClick={applyImport}
+              disabled={importing || !plan || (!plan.added.length && !plan.updated.length)}
+            >
+              {importing
+                ? "Importing…"
+                : plan
+                  ? `Import ${plan.added.length + plan.updated.length} entries`
+                  : "Import"}
+            </button>
+          </>
+        }
+      >
+        {plan && (
+          <div className="grid gap-4">
+            <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+              <Stat label="New entries" value={plan.added.length} tone="green" />
+              <Stat label="Will overwrite" value={plan.updated.length} tone="gold" />
+              <Stat label="New parties" value={plan.newParties.length} />
+              <Stat label="New drivers" value={plan.newDrivers.length} />
+            </div>
+
+            {plan.updated.length > 0 && (
+              <p className="rounded-lg bg-gold-50 px-3 py-2 text-xs text-gold-900">
+                <strong>{plan.updated.length}</strong>{" "}
+                {plan.updated.length === 1 ? "row matches an entry" : "rows match entries"} already
+                recorded — same date, invoice no. and vehicle. Importing replaces{" "}
+                {plan.updated.length === 1 ? "it" : "them"} with what the file says. Whatever
+                invoice they sit on is kept.
+              </p>
+            )}
+
+            {(plan.newParties.length > 0 || plan.newDrivers.length > 0) && (
+              <p className="text-xs text-navy-600">
+                Names not on file yet will be created:{" "}
+                <strong>
+                  {[...plan.newParties.map((p) => p.name), ...plan.newDrivers.map((d) => d.name)]
+                    .slice(0, 8)
+                    .join(", ")}
+                </strong>
+                {plan.newParties.length + plan.newDrivers.length > 8 && " and more"}.
+              </p>
+            )}
+
+            {plan.hasExpenseTotals && (
+              <p className="text-xs text-navy-500">
+                The file carries expense totals rather than the individual costs, so each one comes
+                in as a single line named &ldquo;Imported&rdquo;.
+              </p>
+            )}
+
+            {plan.hadInvoiced && (
+              <p className="text-xs text-navy-500">
+                Rows marked as invoiced can&apos;t be reconnected to their bill from a file — new
+                entries arrive unbilled.
+              </p>
+            )}
+
+            {plan.problems.length > 0 && (
+              <div className="rounded-lg border border-red-200 bg-red-50 p-3">
+                <p className="text-xs font-bold text-red-700">
+                  {plan.problems.length} {plan.problems.length === 1 ? "row" : "rows"} skipped
+                </p>
+                <ul className="mt-1.5 grid gap-1">
+                  {plan.problems.slice(0, 10).map((p, i) => (
+                    <li key={i} className="text-xs text-red-700">
+                      {p.row ? `Row ${p.row}: ` : ""}
+                      {p.message}
+                    </li>
+                  ))}
+                  {plan.problems.length > 10 && (
+                    <li className="text-xs text-red-600">
+                      …and {plan.problems.length - 10} more.
+                    </li>
+                  )}
+                </ul>
+              </div>
+            )}
+
+            {plan.added.length + plan.updated.length > 0 && (
+              <div className="rounded-lg border border-navy-200">
+                <p className="border-b border-navy-100 px-3 py-2 text-xs font-bold text-navy-600">
+                  First few rows
+                </p>
+                <div className="max-h-56 overflow-y-auto">
+                  <Table
+                    head={
+                      <>
+                        <th className="th">Date</th>
+                        <th className="th">Inv. No</th>
+                        <th className="th">Party</th>
+                        <th className="th">Vehicle</th>
+                        <th className="th text-right">Amount</th>
+                        <th className="th"></th>
+                      </>
+                    }
+                  >
+                    {[
+                      ...plan.added.map((e) => ({ e, kind: "new" as const })),
+                      ...plan.updated.map((u) => ({ e: u.next, kind: "update" as const })),
+                    ]
+                      .slice(0, 20)
+                      .map(({ e, kind }) => (
+                        <tr key={e.id}>
+                          <td className="td">{fmtDate(e.date)}</td>
+                          <td className="td font-semibold">{e.invoiceNo || "—"}</td>
+                          <td className="td max-w-[160px] truncate">{partyName(e.partyId)}</td>
+                          <td className="td font-mono text-xs">{e.vehicleNo}</td>
+                          <td className="td tabular text-right">{inr(entryTotal(e))}</td>
+                          <td className="td">
+                            {kind === "new" ? (
+                              <Chip tone="green">New</Chip>
+                            ) : (
+                              <Chip tone="gold">Replaces</Chip>
+                            )}
+                          </td>
+                        </tr>
+                      ))}
+                  </Table>
+                </div>
+              </div>
+            )}
+
+            {importError && (
+              <p className="rounded-lg bg-red-50 px-3 py-2 text-xs font-semibold text-red-700">
+                {importError}
+              </p>
+            )}
+          </div>
+        )}
       </Modal>
 
       {/* Photos */}
