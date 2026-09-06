@@ -18,6 +18,7 @@ export interface ReportRow {
 export function EntryReportSheet({
   invoiceNo,
   partyName,
+  direction,
   fromDate,
   toDate,
   rows,
@@ -25,6 +26,8 @@ export function EntryReportSheet({
 }: {
   invoiceNo: string;
   partyName?: string;
+  /** Printed at the top so the annexure says which side of the ledger it covers. */
+  direction?: "inward" | "outward";
   fromDate?: string;
   toDate?: string;
   rows: ReportRow[];
@@ -33,6 +36,8 @@ export function EntryReportSheet({
   return (
     <div className="print-page rpt-sheet">
       <style>{CSS}</style>
+
+      {direction && <div className="rpt-direction">{direction.toUpperCase()}</div>}
 
       <div className="rpt-head">
         <div className="rpt-billno">{invoiceNo}</div>
@@ -92,6 +97,16 @@ const CSS = `
   box-sizing: border-box;
 }
 .rpt-sheet * { box-sizing: border-box; }
+.rpt-direction {
+  text-align: center;
+  font-size: 13px;
+  font-weight: 800;
+  letter-spacing: 2px;
+  padding-bottom: 6px;
+  margin-bottom: 8px;
+  border-bottom: 2px solid #17365d;
+  color: #17365d;
+}
 .rpt-head { margin-bottom: 8px; padding-left: 2px; }
 .rpt-billno { font-size: 12px; font-weight: 700; }
 .rpt-party { font-size: 10px; color: #687386; margin-top: 2px; }
@@ -111,7 +126,15 @@ const CSS = `
 .rpt-foot { margin-top: 10px; font-size: 9px; color: #687386; }
 
 @media print {
-  .rpt-sheet { width: 100% !important; min-height: auto !important; box-shadow: none !important; padding: 0 !important; }
+  /* The page has no margin, so the whitespace lives here instead — see the
+     note on @page in globals.css. */
+  .rpt-sheet {
+    width: 100% !important;
+    min-height: auto !important;
+    box-shadow: none !important;
+    padding: 10mm !important;
+    margin: 0 !important;
+  }
   .rpt-table { page-break-inside: auto; }
   .rpt-table tr { page-break-inside: avoid; }
   .rpt-table thead { display: table-header-group; }

@@ -35,6 +35,20 @@ export function emptyTotals(): Totals {
   };
 }
 
+/**
+ * Net split by direction — inward and outward are separate businesses, so
+ * they're reported separately rather than netted off against each other.
+ */
+export function netByDirection(entries: Entry[]): { inward: number; outward: number } {
+  let inward = 0;
+  let outward = 0;
+  for (const e of entries) {
+    if ((e.direction ?? "outward") === "inward") inward += entryNet(e);
+    else outward += entryNet(e);
+  }
+  return { inward: round2(inward), outward: round2(outward) };
+}
+
 export function addEntry(t: Totals, e: Entry): Totals {
   t.trips += 1;
   t.qty += num(e.qty);

@@ -216,9 +216,10 @@ body {
     display: none !important;
   }
 
-  /* The content column is offset for the sidebar on screen; not on paper. */
+  /* The content column is offset for the sidebar on screen; not on paper.
+     The 10mm keeps reports off the very edge now that the page has no margin. */
   main {
-    padding: 0 !important;
+    padding: 10mm !important;
     margin: 0 !important;
     max-width: none !important;
     width: 100% !important;
@@ -260,9 +261,28 @@ body {
     break-inside: avoid;
   }
 
+  /*
+   * A zero page margin is what stops the browser stamping its own header and
+   * footer — the date, the time and the app's URL — into the margin strip of
+   * every printed sheet. The whitespace those margins used to give is put
+   * back as padding on the sheets themselves, below.
+   */
   @page {
     size: A4 portrait;
-    margin: 10mm;
+    margin: 0;
+  }
+
+  /* The print routes render standalone, so their page wrapper would otherwise
+     carry a full viewport height into print and push out a blank sheet. */
+  .print-root {
+    min-height: 0 !important;
+    padding: 0 !important;
+    background: #fff !important;
+  }
+  .print-body {
+    padding: 0 !important;
+    margin: 0 !important;
+    max-width: none !important;
   }
 
   /*
@@ -276,5 +296,5 @@ body {
 
 @page landscapePage {
   size: A4 landscape;
-  margin: 10mm;
+  margin: 0;
 }

@@ -24,6 +24,7 @@ import {
   today,
   toISODate,
 } from "@/lib/calc";
+import { netByDirection } from "@/lib/report";
 import { Card, Chip, Combo, EmptyState, PageHeader, Select, Stat, Table, cx } from "@/components/ui";
 
 type RangeKey = "today" | "week" | "month" | "all";
@@ -71,6 +72,8 @@ export default function DashboardPage() {
       ),
     [scoped]
   );
+
+  const net = useMemo(() => netByDirection(scoped), [scoped]);
 
   /** Vehicles sent per party in the selected window — the headline question. */
   const byParty = useMemo(() => {
@@ -182,21 +185,23 @@ export default function DashboardPage() {
           icon={<IndianRupee size={16} />}
         />
         <Stat
-          label="Vehicle expenses"
-          value={`₹${inr(totals.vehicleExp)}`}
+          label="Expenses"
+          value={`₹${inr(totals.vehicleExp + totals.driverExp)}`}
           tone="red"
           icon={<Receipt size={16} />}
         />
+        {/* Reported apart: netting inward against outward hides which side of
+            the business is actually earning. */}
         <Stat
-          label="Driver expenses"
-          value={`₹${inr(totals.driverExp)}`}
-          tone="red"
-          icon={<Receipt size={16} />}
+          label="Outward net"
+          value={`₹${inr(net.outward)}`}
+          tone={net.outward >= 0 ? "green" : "red"}
+          icon={<TrendingUp size={16} />}
         />
         <Stat
-          label="Net"
-          value={`₹${inr(totals.net)}`}
-          tone={totals.net >= 0 ? "green" : "red"}
+          label="Inward net"
+          value={`₹${inr(net.inward)}`}
+          tone={net.inward >= 0 ? "green" : "red"}
           icon={<TrendingUp size={16} />}
         />
       </div>

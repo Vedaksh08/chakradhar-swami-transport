@@ -43,6 +43,7 @@ import { EntryForm, blankEntry } from "@/components/EntryForm";
 import { PhotoStrip } from "@/components/PhotoLines";
 import { downloadCsv } from "@/lib/csv";
 import { buildImportPlan, type ImportPlan } from "@/lib/entryImport";
+import { netByDirection } from "@/lib/report";
 
 export default function EntriesPage() {
   const store = useStore();
@@ -115,6 +116,8 @@ export default function EntriesPage() {
       ),
     [filtered]
   );
+
+  const net = useMemo(() => netByDirection(filtered), [filtered]);
 
   /** How many of the user's entries the current filters are hiding. */
   const hiddenCount = entries.length - filtered.length;
@@ -317,12 +320,18 @@ export default function EntriesPage() {
         {isOwner ? (
           <>
             <Stat label="Billed" value={`₹${inr(totals.billed)}`} tone="gold" />
-            <Stat label="Vehicle expenses" value={`₹${inr(totals.vehicleExp)}`} tone="red" />
-            <Stat label="Driver expenses" value={`₹${inr(totals.driverExp)}`} tone="red" />
+            <Stat label="Expenses" value={`₹${inr(totals.vehicleExp + totals.driverExp)}`} tone="red" />
+            {/* Inward and outward are kept apart — netting one against the
+                other hides which side of the business is actually earning. */}
             <Stat
-              label="Net"
-              value={`₹${inr(totals.net)}`}
-              tone={totals.net >= 0 ? "green" : "red"}
+              label="Outward net"
+              value={`₹${inr(net.outward)}`}
+              tone={net.outward >= 0 ? "green" : "red"}
+            />
+            <Stat
+              label="Inward net"
+              value={`₹${inr(net.inward)}`}
+              tone={net.inward >= 0 ? "green" : "red"}
               sub={`${totals.qty.toFixed(3)} total qty`}
             />
           </>

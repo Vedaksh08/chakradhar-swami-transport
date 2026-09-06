@@ -13,7 +13,7 @@ import {
   fmtDate,
   inr,
 } from "@/lib/calc";
-import { groupBy, totalsFor } from "@/lib/report";
+import { groupBy, netByDirection, totalsFor } from "@/lib/report";
 import {
   Card,
   Chip,
@@ -48,6 +48,7 @@ export default function PartyDetailPage() {
   );
 
   const totals = useMemo(() => totalsFor(trips), [trips]);
+  const net = useMemo(() => netByDirection(trips), [trips]);
 
   const byVehicle = useMemo(
     () => groupBy(trips, (e) => e.vehicleNo, (k) => k),
@@ -150,7 +151,7 @@ export default function PartyDetailPage() {
         </div>
       </Card>
 
-      <div className="stagger mb-5 grid grid-cols-2 gap-3 sm:gap-4 lg:grid-cols-5">
+      <div className="stagger mb-5 grid grid-cols-2 gap-3 sm:gap-4 lg:grid-cols-6">
         <Stat
           label="Vehicles sent"
           value={totals.trips}
@@ -160,10 +161,16 @@ export default function PartyDetailPage() {
         <Stat label="Billed" value={`₹${inr(totals.billed)}`} tone="gold" />
         <Stat label="Detention" value={`₹${inr(totals.detention)}`} />
         <Stat label="Unbilled" value={`₹${inr(unbilled)}`} tone="red" />
+        {/* Kept apart, the same as everywhere else the net is shown. */}
         <Stat
-          label="Net"
-          value={`₹${inr(totals.net)}`}
-          tone={totals.net >= 0 ? "green" : "red"}
+          label="Outward net"
+          value={`₹${inr(net.outward)}`}
+          tone={net.outward >= 0 ? "green" : "red"}
+        />
+        <Stat
+          label="Inward net"
+          value={`₹${inr(net.inward)}`}
+          tone={net.inward >= 0 ? "green" : "red"}
           sub={`${totals.qty.toFixed(3)} qty`}
         />
       </div>

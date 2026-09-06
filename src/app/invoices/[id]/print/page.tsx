@@ -71,7 +71,7 @@ export default function InvoicePrintPage() {
   const showReport = scope !== "invoice" && hasEntries;
 
   return (
-    <div className="min-h-screen bg-navy-100 pb-10">
+    <div className="print-root min-h-screen bg-navy-100 pb-10">
       {/* Toolbar — hidden when printing */}
       <div className="no-print sticky top-0 z-10 border-b border-navy-200 bg-white/90 backdrop-blur">
         <div className="mx-auto flex max-w-[900px] flex-wrap items-center justify-between gap-3 px-4 py-3">
@@ -128,7 +128,7 @@ export default function InvoicePrintPage() {
       </div>
 
       {/* Sheets are fixed A4 width, so let narrow screens scroll rather than squash. */}
-      <div className="mx-auto max-w-[900px] overflow-x-auto px-4 pt-6">
+      <div className="print-body mx-auto max-w-[900px] overflow-x-auto px-4 pt-6">
         {showInvoice && (
           <div className="animate-rise">
             <InvoiceSheet
@@ -146,6 +146,8 @@ export default function InvoicePrintPage() {
             <EntryReportSheet
               invoiceNo={invoice.invoiceNo}
               partyName={billTo?.name}
+              // Falls back to outward for bills raised before the split.
+              direction={invoice.direction ?? "outward"}
               fromDate={fmtDate(invoice.fromDate)}
               toDate={fmtDate(invoice.toDate)}
               rows={rows.map((e) => ({

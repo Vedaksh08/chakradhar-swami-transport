@@ -323,6 +323,30 @@ const CSS = `
 }
 
 @media print {
-  .inv-sheet { width: 100% !important; min-height: auto !important; box-shadow: none !important; padding: 0 !important; }
+  /*
+   * One invoice, one sheet of paper. The page itself now has no margin (so
+   * the browser can't print its own header and footer), which is why the
+   * whitespace is padding here instead. Height is pinned to the page so the
+   * signature block sits at the foot rather than tipping onto a second sheet.
+   */
+  .inv-sheet {
+    width: 210mm !important;
+    height: 297mm !important;
+    min-height: 0 !important;
+    max-height: 297mm !important;
+    padding: 10mm !important;
+    margin: 0 !important;
+    box-shadow: none !important;
+    overflow: hidden !important;
+    break-inside: avoid;
+    page-break-inside: avoid;
+    display: flex;
+    flex-direction: column;
+  }
+  /* The signature row is the last thing on the sheet; letting it take the
+     slack keeps everything above it snug at the top. */
+  .inv-sheet .signature-section { margin-top: auto !important; }
+  .receiver-signature, .authorized-signature { min-height: 64px !important; }
+  .transport-description-row td { height: auto !important; }
 }
 `;
